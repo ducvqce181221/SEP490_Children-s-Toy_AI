@@ -23,8 +23,10 @@ logger = get_logger(__name__)
 class ModerationRepository:
 
     async def fetch_pending_reviews(self, batch_size: int = 20) -> list[ReviewRecord]:
-        sql = """
-            UPDATE TOP (@batch_size) rp
+        # NOTE: TOP does not support ? parameter markers in pyodbc/SQL Server.
+        # batch_size is always an internal integer — safe to inline directly.
+        sql = f"""
+            UPDATE TOP ({int(batch_size)}) rp
             SET rp.[ModerationStatus] = 'Processing',
                 rp.[UpdatedAt] = GETUTCDATE()
             OUTPUT
@@ -37,7 +39,7 @@ class ModerationRepository:
         """
         async with get_connection() as conn:
             async with get_cursor(conn) as cur:
-                await cur.execute(sql, batch_size)
+                await cur.execute(sql)  # no params needed — TOP value is inlined
                 rows = await cur.fetchall()
         return [
             ReviewRecord(
@@ -47,6 +49,7 @@ class ModerationRepository:
             )
             for row in rows
         ]
+
 
     async def fetch_images_for_review(self, review_id: int) -> list[ReviewImageRecord]:
         sql = """

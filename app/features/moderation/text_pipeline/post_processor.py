@@ -52,17 +52,19 @@ def apply_business_rules(
     overrides: list[str] = []
     new_decision = result.decision
 
-    # Rule 1: Low confidence → MANUAL_REVIEW
+    # Rule 1: Low confidence → escalate APPROVED/ambiguous to MANUAL_REVIEW
+    # (do NOT downgrade REJECTED — REJECTED is more severe than MANUAL_REVIEW)
     if result.confidence < settings.llm_confidence_threshold:
-        if new_decision != ModerationDecision.MANUAL_REVIEW:
+        if new_decision == ModerationDecision.APPROVED:
             new_decision = ModerationDecision.MANUAL_REVIEW
             overrides.append(
                 f"low_confidence:{result.confidence:.2f}<{settings.llm_confidence_threshold}"
             )
 
-    # Rule 2: health_concern flag → MANUAL_REVIEW (child safety)
+    # Rule 2: health_concern flag → escalate APPROVED to MANUAL_REVIEW (child safety)
+    # (do NOT downgrade REJECTED — a rejected review with health concern stays rejected)
     if "health_concern" in result.flags:
-        if new_decision != ModerationDecision.MANUAL_REVIEW:
+        if new_decision == ModerationDecision.APPROVED:
             new_decision = ModerationDecision.MANUAL_REVIEW
             overrides.append("health_concern_flag")
 

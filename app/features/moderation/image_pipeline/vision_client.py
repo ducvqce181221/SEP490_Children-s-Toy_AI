@@ -7,6 +7,7 @@ Makes a single batch request (2 units) to minimise latency and cost.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from google.cloud import vision
@@ -55,18 +56,31 @@ class VisionAnalysisResult:
 
 class GoogleVisionClient:
     def __init__(self) -> None:
-        self._client = vision.ImageAnnotatorAsyncClient()
+        # Use the SYNC client — run in a thread to avoid blocking the event loop.
+        # ImageAnnotatorAsyncClient has a different gRPC-based API that does not
+        # expose the simple annotate_image() helper, so we use the sync client here.
+        self._client = vision.ImageAnnotatorClient()
 
-    @async_retry(max_attempts=3, min_wait=1.0, max_wait=8.0, exceptions=(Exception,))
-    async def analyze_image(self, image_bytes: bytes) -> VisionAnalysisResult:
+    def _call_vision_api(self, image_bytes: bytes) -> AnnotateImageResponse:
+        """Blocking call to Vision API — executed in a thread pool."""
         image = vision.Image(content=image_bytes)
         features = [
             vision.Feature(type_=vision.Feature.Type.SAFE_SEARCH_DETECTION),
             vision.Feature(type_=vision.Feature.Type.LABEL_DETECTION, max_results=MAX_LABELS),
         ]
         request = vision.AnnotateImageRequest(image=image, features=features)
-        response: AnnotateImageResponse = await self._client.annotate_image(request=request)
+        # annotate_image is a convenience method on the SYNC client only
+        response: AnnotateImageResponse = self._client.annotate_image(request=request)
+        return response
+
+    @async_retry(max_attempts=3, min_wait=1.0, max_wait=8.0, exceptions=(Exception,))
+    async def analyze_image(self, image_bytes: bytes) -> VisionAnalysisResult:
+        # Run the blocking Vision API call in a thread to avoid blocking asyncio loop
+        response: AnnotateImageResponse = await asyncio.to_thread(
+            self._call_vision_api, image_bytes
+        )
         return self._parse_response(response)
+
 
     def _parse_response(self, response: AnnotateImageResponse) -> VisionAnalysisResult:
         ss = response.safe_search_annotation

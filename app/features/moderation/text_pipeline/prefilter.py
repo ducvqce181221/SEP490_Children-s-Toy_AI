@@ -1,4 +1,4 @@
-"""
+r"""
 app/features/moderation/text_pipeline/prefilter.py
 --------------------------------------------------
 Bước 1 của text pipeline: Rule-based pre-filter (không dùng AI, < 1ms).

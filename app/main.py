@@ -62,3 +62,8 @@ async def health_check() -> JSONResponse:
         content={"status": "ok", "service": "ai-moderation-sidecar", "version": "1.0.0"},
         status_code=200,
     )
+
+if __name__ == "__main__":
+    import uvicorn
+    # Lưu ý: dùng "app.main:app" thay vì "main:app" để uvicorn hiểu đúng cấu trúc package
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8001, reload=True)
