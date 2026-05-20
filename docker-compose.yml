@@ -1,0 +1,25 @@
+services:
+  ai-moderation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sep490-ai-moderation:latest
+    container_name: sep490_ai_moderation
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    networks:
+      - sep490_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+networks:
+  sep490_network:
+    external: true
+    name: sep490_network
