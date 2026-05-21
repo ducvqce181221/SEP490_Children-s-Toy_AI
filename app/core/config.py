@@ -13,7 +13,7 @@ import base64
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,16 +28,61 @@ class Settings(BaseSettings):
     # ── App ──────────────────────────────────────────────────────────────
     app_env: Literal["development", "production"] = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-    internal_api_key: str = Field(default="change-me", description="Key for /moderation/trigger")
+    internal_api_key: str = Field(
+        default="change-me",
+        validation_alias=AliasChoices(
+            "INTERNAL_API_KEY",
+            "AI_INTERNAL_API_KEY",
+            "BLOG_COMMENT_INTERNAL_API_KEY",
+        ),
+        description="Key for /moderation/trigger",
+    )
 
     # ── Database ─────────────────────────────────────────────────────────
     mssql_connection_string: str = Field(..., description="Full pyodbc connection string for SQL Server")
 
     # ── Groq LLM ─────────────────────────────────────────────────────────
-    groq_api_key: str = Field(..., description="Groq API key")
-    groq_model: str = "llama-3.1-8b-instant"
+    groq_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("GROQ_API_KEY"),
+        description="Groq API key for non-blog moderation flows",
+    )
+    groq_model: str = Field(
+        default="llama-3.1-8b-instant",
+        validation_alias=AliasChoices("GROQ_MODEL"),
+    )
+    groq_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GROQ_BASE_URL"),
+        description="Optional OpenAI-compatible base URL override for Groq client",
+    )
     groq_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     groq_max_tokens: int = Field(default=200, gt=0)
+
+    blog_deepseek_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("BLOG_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"),
+        description="DeepSeek API key dedicated for blog comment moderation",
+    )
+    blog_deepseek_model: str = Field(
+        default="deepseek-chat",
+        validation_alias=AliasChoices("BLOG_DEEPSEEK_MODEL", "DEEPSEEK_MODEL"),
+    )
+    blog_deepseek_base_url: str = Field(
+        default="https://api.deepseek.com",
+        validation_alias=AliasChoices("BLOG_DEEPSEEK_BASE_URL", "DEEPSEEK_BASE_URL"),
+    )
+    blog_deepseek_temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        validation_alias=AliasChoices("BLOG_DEEPSEEK_TEMPERATURE", "GROQ_TEMPERATURE"),
+    )
+    blog_deepseek_max_tokens: int = Field(
+        default=200,
+        gt=0,
+        validation_alias=AliasChoices("BLOG_DEEPSEEK_MAX_TOKENS", "GROQ_MAX_TOKENS"),
+    )
 
     # ── Google Cloud Vision ───────────────────────────────────────────────
     google_application_credentials: str | None = None
@@ -49,6 +94,15 @@ class Settings(BaseSettings):
     max_concurrent_reviews: int = Field(default=5, gt=0)
     max_retry_attempts: int = Field(default=3, ge=1)
     max_failure_count_before_alert: int = Field(default=5, ge=1)
+    blog_comment_worker_enabled: bool = True
+    blog_comment_poll_interval_seconds: int = Field(default=30, gt=0)
+    blog_comment_batch_size: int = Field(default=20, gt=0)
+    blog_comment_max_concurrent: int = Field(default=5, gt=0)
+    blog_comment_retry_interval_minutes: int = Field(default=5, gt=0)
+    blog_comment_manual_review_timeout_hours: int = Field(default=24, gt=0)
+    blog_comment_lock_days: int = Field(default=7, gt=0)
+    blog_comment_violation_window_days: int = Field(default=15, gt=0)
+    blog_comment_violation_threshold: int = Field(default=3, gt=0)
 
     # ── Image thresholds ─────────────────────────────────────────────────
     image_min_size_kb: int = Field(default=10, gt=0)
