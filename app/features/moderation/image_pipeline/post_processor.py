@@ -10,6 +10,7 @@ from app.core.logging import get_logger
 from app.features.moderation.image_pipeline.vision_client import VisionAnalysisResult
 from app.features.moderation.image_pipeline.prefilter import PrefilterImageResult
 from app.features.moderation.schemas import ImagePipelineResult, ModerationDecision
+from app.features.moderation.text_pipeline.prefilter import find_sensitive_patterns
 
 logger = get_logger(__name__)
 
@@ -29,6 +30,18 @@ def apply_vision_results(
             phash=phash,
             raw_vision_result=vision_result.raw_response,
         )
+
+    if vision_result.detected_text:
+        text_violation_reason = find_sensitive_patterns(vision_result.detected_text)
+        if text_violation_reason:
+            return ImagePipelineResult(
+                decision=ModerationDecision.REJECTED,
+                flags=["vision_text_violation"],
+                reason=f"Ảnh chứa thông tin nhạy cảm: {text_violation_reason}",
+                decided_by="vision_ocr",
+                phash=phash,
+                raw_vision_result=vision_result.raw_response,
+            )
 
     if not vision_result.toy_label_found:
         top_labels = [

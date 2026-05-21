@@ -102,16 +102,6 @@ def run_image_prefilter(
             phash=phash, diagnostics=diagnostics,
         )
 
-    qr_detector = cv2.QRCodeDetector()
-    img_color = _pil_to_cv2_bgr(image)
-    data, _, _ = qr_detector.detectAndDecode(img_color)
-    if data:
-        return PrefilterImageResult(
-            decision=ModerationDecision.REJECTED, flags=["qr_code_detected"],
-            reason="Phát hiện QR code trong ảnh",
-            phash=phash, diagnostics=diagnostics,
-        )
-
     return PrefilterImageResult(
         decision=ModerationDecision.APPROVED, flags=[],
         reason="Passed local pre-filter", phash=phash, diagnostics=diagnostics,
@@ -120,10 +110,6 @@ def run_image_prefilter(
 
 def _pil_to_cv2_gray(image: Image.Image) -> np.ndarray:
     return cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
-
-
-def _pil_to_cv2_bgr(image: Image.Image) -> np.ndarray:
-    return cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
 
 
 def _compute_phash_safe(image: Image.Image) -> str | None:

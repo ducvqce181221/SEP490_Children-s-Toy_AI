@@ -44,6 +44,7 @@ class VisionAnalysisResult:
         hard_violation: bool,
         violation_reason: str | None,
         toy_label_found: bool,
+        detected_text: str | None = None,
         raw_response: dict[str, Any] | None = None,
     ) -> None:
         self.safe_search = safe_search
@@ -51,6 +52,7 @@ class VisionAnalysisResult:
         self.hard_violation = hard_violation
         self.violation_reason = violation_reason
         self.toy_label_found = toy_label_found
+        self.detected_text = detected_text
         self.raw_response = raw_response or {}
 
 
@@ -67,6 +69,7 @@ class GoogleVisionClient:
         features = [
             vision.Feature(type_=vision.Feature.Type.SAFE_SEARCH_DETECTION),
             vision.Feature(type_=vision.Feature.Type.LABEL_DETECTION, max_results=MAX_LABELS),
+            vision.Feature(type_=vision.Feature.Type.TEXT_DETECTION),
         ]
         request = vision.AnnotateImageRequest(image=image, features=features)
         # annotate_image is a convenience method on the SYNC client only
@@ -81,6 +84,27 @@ class GoogleVisionClient:
         )
         return self._parse_response(response)
 
+    def _call_vision_api_batch(self, images_bytes: list[bytes]) -> list[AnnotateImageResponse]:
+        """Blocking call to Vision API for batch annotation — executed in a thread pool."""
+        requests = []
+        for img_bytes in images_bytes:
+            image = vision.Image(content=img_bytes)
+            features = [
+                vision.Feature(type_=vision.Feature.Type.SAFE_SEARCH_DETECTION),
+                vision.Feature(type_=vision.Feature.Type.LABEL_DETECTION, max_results=MAX_LABELS),
+                vision.Feature(type_=vision.Feature.Type.TEXT_DETECTION),
+            ]
+            requests.append(vision.AnnotateImageRequest(image=image, features=features))
+        
+        response = self._client.batch_annotate_images(requests=requests)
+        return list(response.responses)
+
+    @async_retry(max_attempts=3, min_wait=1.0, max_wait=8.0, exceptions=(Exception,))
+    async def analyze_images_batch(self, images_bytes: list[bytes]) -> list[VisionAnalysisResult]:
+        if not images_bytes:
+            return []
+        responses = await asyncio.to_thread(self._call_vision_api_batch, images_bytes)
+        return [self._parse_response(resp) for resp in responses]
 
     def _parse_response(self, response: AnnotateImageResponse) -> VisionAnalysisResult:
         ss = response.safe_search_annotation
@@ -119,13 +143,22 @@ class GoogleVisionClient:
                         toy_label_found = True
                         break
 
+        detected_text = None
+        if response.text_annotations:
+            detected_text = response.text_annotations[0].description
+
         return VisionAnalysisResult(
             safe_search=safe_search_dict,
             labels=labels,
             hard_violation=hard_violation,
             violation_reason=violation_reason,
             toy_label_found=toy_label_found,
-            raw_response={"safe_search": safe_search_dict, "labels": labels},
+            detected_text=detected_text,
+            raw_response={
+                "safe_search": safe_search_dict,
+                "labels": labels,
+                "detected_text": detected_text,
+            },
         )
 
 
