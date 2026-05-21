@@ -11,26 +11,46 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.features.moderation.blog_comment.jobs import (
+    run_auto_reject_manual_review_timeout_job,
+    run_auto_unlock_comment_accounts_job,
+)
+from app.features.moderation.blog_comment.worker import run_blog_comment_moderation_batch
 from app.worker.moderation_worker import run_moderation_batch
 
 logger = get_logger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
-_is_running: bool = False
+_is_review_running: bool = False
+_is_blog_comment_running: bool = False
 
 
 async def _safe_run_batch() -> None:
-    global _is_running
-    if _is_running:
-        logger.debug("Previous batch still running, skipping this cycle")
+    global _is_review_running
+    if _is_review_running:
+        logger.debug("Previous product review batch still running, skipping this cycle")
         return
-    _is_running = True
+    _is_review_running = True
     try:
         await run_moderation_batch()
     except Exception as exc:
         logger.error("Scheduler batch failed", error=str(exc), exc_info=True)
     finally:
-        _is_running = False
+        _is_review_running = False
+
+
+async def _safe_run_blog_comment_batch() -> None:
+    global _is_blog_comment_running
+    if _is_blog_comment_running:
+        logger.debug("Previous blog comment batch still running, skipping this cycle")
+        return
+    _is_blog_comment_running = True
+    try:
+        await run_blog_comment_moderation_batch()
+    except Exception as exc:
+        logger.error("Blog comment scheduler batch failed", error=str(exc), exc_info=True)
+    finally:
+        _is_blog_comment_running = False
 
 
 def create_scheduler() -> AsyncIOScheduler:
@@ -44,6 +64,31 @@ def create_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
         max_instances=1,
     )
+    if settings.blog_comment_worker_enabled:
+        scheduler.add_job(
+            func=_safe_run_blog_comment_batch,
+            trigger=IntervalTrigger(seconds=settings.blog_comment_poll_interval_seconds),
+            id="blog_comment_moderation_poll",
+            name="Blog Comment Moderation Poll Worker",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            func=run_auto_reject_manual_review_timeout_job,
+            trigger=IntervalTrigger(hours=1),
+            id="blog_comment_auto_reject_timeout",
+            name="Blog Comment Auto Reject Timeout Job",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            func=run_auto_unlock_comment_accounts_job,
+            trigger=IntervalTrigger(hours=1),
+            id="blog_comment_auto_unlock_accounts",
+            name="Blog Comment Auto Unlock Accounts Job",
+            replace_existing=True,
+            max_instances=1,
+        )
     return scheduler
 
 
