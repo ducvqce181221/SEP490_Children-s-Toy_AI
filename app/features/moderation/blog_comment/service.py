@@ -216,7 +216,7 @@ class BlogCommentModerationService:
         )
         await self._repo.insert_moderation_log(
             record=record,
-            action="Approved",
+            action="AutoApproved",
             moderator_type="AI",
             confidence_score=ai_result.confidence,
             moderation_result=ai_result.raw,
@@ -278,12 +278,6 @@ class BlogCommentModerationService:
             status=BlogCommentStatus.PENDING,
             retry_count=new_retry_count,
         )
-        await self._repo.insert_moderation_log(
-            record=record,
-            action="Retry",
-            moderator_type="SYSTEM",
-            moderation_result={"error": error_text, "retry_count": new_retry_count},
-        )
 
     async def _mark_failed(self, record: BlogCommentRecord, retry_count: int, error_text: str) -> None:
         reason = await self._repo.get_reason_by_content(AI_UNAVAILABLE_REASON)
@@ -296,7 +290,7 @@ class BlogCommentModerationService:
         await self._repo.insert_moderation_log(
             record=record,
             action="Failed",
-            moderator_type="SYSTEM",
+            moderator_type="AI",
             ban_reason_id=reason.ban_reason_id if reason else None,
             moderation_result={"error": error_text, "retry_count": retry_count},
         )
