@@ -30,9 +30,8 @@ async def run_llm_classifier(
     Returns:
         TextPipelineResult with LLM decision, confidence, category, flags, reason.
     """
-    client = get_groq_client()
-
     try:
+        client = get_groq_client()
         result = await client.classify_text(comment=comment, rating=rating)
     except Exception as exc:
         logger.error("LLM classification failed after retries", error=str(exc))
