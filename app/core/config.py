@@ -79,9 +79,20 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("BLOG_DEEPSEEK_TEMPERATURE", "GROQ_TEMPERATURE"),
     )
     blog_deepseek_max_tokens: int = Field(
-        default=200,
+        default=1800,
         gt=0,
         validation_alias=AliasChoices("BLOG_DEEPSEEK_MAX_TOKENS", "GROQ_MAX_TOKENS"),
+    )
+    blog_deepseek_timeout_seconds: float = Field(
+        default=20.0,
+        gt=0.0,
+        validation_alias=AliasChoices("BLOG_DEEPSEEK_TIMEOUT_SECONDS"),
+    )
+    blog_deepseek_retry_attempts: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        validation_alias=AliasChoices("BLOG_DEEPSEEK_RETRY_ATTEMPTS"),
     )
 
     # ── Google Cloud Vision ───────────────────────────────────────────────

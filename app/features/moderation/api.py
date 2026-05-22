@@ -20,6 +20,14 @@ from app.features.moderation.blog_comment.repository import BlogCommentModeratio
 from app.features.moderation.blog_comment.schemas import BlogCommentTargetType
 from app.features.moderation.blog_comment.service import BlogCommentModerationService
 from app.features.moderation.blog_comment.worker import run_blog_comment_moderation_batch
+from app.features.blog_content.schemas import (
+    BlogContentGenerateRequest,
+    BlogContentGenerateResponse,
+)
+from app.features.blog_content.service import (
+    BlogContentGenerationError,
+    generate_blog_content,
+)
 from app.worker.moderation_worker import run_moderation_batch
 
 logger = get_logger(__name__)
@@ -192,3 +200,37 @@ async def moderate_one_blog_comment(payload: ModerateOneRequest) -> ModerateOneR
         target_id=payload.targetId,
     )
     return ModerateOneResponse(accepted=True, final_status=final_status)
+
+
+@router.post(
+    "/blog-content/generate",
+    response_model=BlogContentGenerateResponse,
+    dependencies=[Depends(verify_internal_key)],
+)
+async def generate_blog_content_endpoint(payload: BlogContentGenerateRequest) -> BlogContentGenerateResponse:
+    logger.info(
+        "Received blog content generation request",
+        action=payload.action,
+        title_len=len(payload.title or ""),
+        prompt_len=len(payload.promptStructure or ""),
+        category_id=payload.defaultCategoryId,
+    )
+    try:
+        title, content = await generate_blog_content(
+            action=payload.action,
+            title=payload.title,
+            description=payload.description,
+            prompt_structure=payload.promptStructure,
+            tone=payload.defaultTone,
+            category_id=payload.defaultCategoryId,
+            source_content=payload.sourceContent,
+        )
+        logger.info(
+            "Blog content generation completed",
+            title_len=len(title or ""),
+            content_len=len(content or ""),
+        )
+        return BlogContentGenerateResponse(title=title, content=content)
+    except BlogContentGenerationError as exc:
+        logger.warning("Blog content generation failed", error=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
