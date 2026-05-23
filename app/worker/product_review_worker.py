@@ -1,5 +1,5 @@
 """
-app/worker/moderation_worker.py
+app/worker/product_review_worker.py
 --------------------------------
 Core worker: fetches Pending reviews from DB and runs moderation pipeline.
 """
@@ -10,8 +10,8 @@ import asyncio
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.features.moderation.repository import ModerationRepository
-from app.features.moderation.service import ModerationOrchestrator
+from app.features.moderation.product_review.repository import ModerationRepository
+from app.features.moderation.product_review.service import ModerationOrchestrator
 
 logger = get_logger(__name__)
 

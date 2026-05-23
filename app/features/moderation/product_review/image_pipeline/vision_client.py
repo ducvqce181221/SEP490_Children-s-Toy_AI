@@ -1,6 +1,6 @@
 """
-app/features/moderation/image_pipeline/vision_client.py
---------------------------------------------------------
+app/features/moderation/product_review/image_pipeline/vision_client.py
+----------------------------------------------------------------------
 Google Cloud Vision API client for SafeSearch + Label Detection.
 Makes a single batch request (2 units) to minimise latency and cost.
 """
@@ -32,8 +32,16 @@ TOY_KEYWORDS = {
     "kid", "baby", "figure", "block", "plush", "stuffed", "board game",
     "educational", "toddler", "children", "playful",
 }
+
+SUSPICIOUS_LABELS = {
+    "fight", "fighting", "wrestling", "altercation", "aggression", "assault",
+    "physical conflict", "bullying", "weapon", "knife", "gun", "pistol",
+    "smoking", "alcohol", "beer", "wine", "gamble", "gambling", "casino",
+}
+
 TOY_LABEL_MIN_SCORE = 0.6
 MAX_LABELS = 20
+
 
 
 class VisionAnalysisResult:
@@ -135,6 +143,16 @@ class GoogleVisionClient:
             for lbl in response.label_annotations
         ]
 
+        # Check for suspicious/violating content based on labels
+        if not hard_violation:
+            for lbl in labels:
+                if lbl["score"] >= 0.60:
+                    desc = lbl["description"]
+                    if any(kw in desc for kw in SUSPICIOUS_LABELS):
+                        hard_violation = True
+                        violation_reason = f"suspicious content label detected: {desc}"
+                        break
+
         toy_label_found = False
         if not hard_violation:
             for lbl in labels:
@@ -142,6 +160,7 @@ class GoogleVisionClient:
                     if any(kw in lbl["description"] for kw in TOY_KEYWORDS):
                         toy_label_found = True
                         break
+
 
         detected_text = None
         if response.text_annotations:

@@ -5,10 +5,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.database import get_connection, get_cursor
-from app.features.moderation.blog_comment.schemas import (
+from app.features.moderation.schemas import (
+    ModerationStatus,
     BlogCommentReason,
     BlogCommentRecord,
-    BlogCommentStatus,
     BlogCommentTargetType,
 )
 
@@ -75,7 +75,7 @@ class BlogCommentModerationRepository:
             target_id=row[0],
             account_id=row[1],
             comment=row[2],
-            moderation_status=BlogCommentStatus(row[3]),
+            moderation_status=ModerationStatus(row[3]),
             retry_count=int(row[4] or 0),
             last_retry_at=row[5],
             created_at=row[6],
@@ -132,7 +132,7 @@ class BlogCommentModerationRepository:
             target_id=row[0],
             account_id=row[1],
             comment=row[2],
-            moderation_status=BlogCommentStatus(row[3]),
+            moderation_status=ModerationStatus(row[3]),
             retry_count=int(row[4] or 0),
             last_retry_at=row[5],
             created_at=row[6],
@@ -233,7 +233,7 @@ class BlogCommentModerationRepository:
                 target_id=row[0],
                 account_id=row[1],
                 comment=row[2],
-                moderation_status=BlogCommentStatus(row[3]),
+                moderation_status=ModerationStatus(row[3]),
                 retry_count=int(row[4] or 0),
                 last_retry_at=row[5],
                 created_at=row[6],
@@ -296,7 +296,7 @@ class BlogCommentModerationRepository:
                 target_id=row[0],
                 account_id=row[1],
                 comment=row[2],
-                moderation_status=BlogCommentStatus(row[3]),
+                moderation_status=ModerationStatus(row[3]),
                 retry_count=int(row[4] or 0),
                 last_retry_at=row[5],
                 created_at=row[6],
@@ -323,7 +323,7 @@ class BlogCommentModerationRepository:
         *,
         target_type: BlogCommentTargetType,
         target_id: int,
-        status: BlogCommentStatus,
+        status: ModerationStatus,
         retry_count: int | None = None,
         manual_review_deadline_hours: int | None = None,
     ) -> None:
@@ -346,7 +346,7 @@ class BlogCommentModerationRepository:
         self,
         *,
         target_id: int,
-        status: BlogCommentStatus,
+        status: ModerationStatus,
         retry_count: int | None,
         manual_review_deadline_hours: int | None,
     ) -> None:
@@ -385,7 +385,7 @@ class BlogCommentModerationRepository:
         self,
         *,
         target_id: int,
-        status: BlogCommentStatus,
+        status: ModerationStatus,
         retry_count: int | None,
         manual_review_deadline_hours: int | None,
     ) -> None:
@@ -548,7 +548,7 @@ class BlogCommentModerationRepository:
                 target_id=row[0],
                 account_id=row[1],
                 comment=row[2],
-                moderation_status=BlogCommentStatus(row[3]),
+                moderation_status=ModerationStatus(row[3]),
                 retry_count=int(row[4] or 0),
                 last_retry_at=row[5],
                 created_at=row[6],
@@ -575,7 +575,7 @@ class BlogCommentModerationRepository:
                 target_id=row[0],
                 account_id=row[1],
                 comment=row[2],
-                moderation_status=BlogCommentStatus(row[3]),
+                moderation_status=ModerationStatus(row[3]),
                 retry_count=int(row[4] or 0),
                 last_retry_at=row[5],
                 created_at=row[6],

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.features.moderation.blog_comment.schemas import BlogCommentDecision
+from app.features.moderation.schemas import ModerationDecision
 
 AI_UNAVAILABLE_REASON = "AI moderation is currently unavailable. Your comment will be sent for manual review"
 
@@ -28,10 +28,11 @@ _CATEGORY_TO_REASON: dict[str, str] = {
 
 def map_ai_category_to_reason_content(
     *,
-    decision: BlogCommentDecision,
+    decision: ModerationDecision,
     category: str,
 ) -> str | None:
-    if decision != BlogCommentDecision.REJECTED:
+    if decision != ModerationDecision.REJECTED:
         return None
     return _CATEGORY_TO_REASON.get(category.strip().lower(), "Content unsuitable for children")
+
 

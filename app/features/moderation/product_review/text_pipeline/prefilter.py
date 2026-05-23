@@ -1,6 +1,6 @@
 r"""
-app/features/moderation/text_pipeline/prefilter.py
---------------------------------------------------
+app/features/moderation/product_review/text_pipeline/prefilter.py
+------------------------------------------------------------------
 Bước 1 của text pipeline: Rule-based pre-filter (không dùng AI, < 1ms).
 
 Reject ngay lập tức nếu:
@@ -14,6 +14,7 @@ Reject ngay lập tức nếu:
 from __future__ import annotations
 
 import re
+from app.utils.text_utils import has_hard_profanity
 
 
 # ── Precompiled patterns ───────────────────────────────────────────────────────
@@ -102,7 +103,11 @@ def run_prefilter(comment: str) -> PrefilterResult:
                 "Spam ký tự lặp: hơn 70% nội dung là cùng một ký tự",
             )
 
-    # 3-5. URL, Phone, and Bank Account detection
+    # 3. Profanity detection
+    if has_hard_profanity(comment):
+        return PrefilterResult(True, "Chứa từ ngữ thô tục cực đoan (chặn tự động)")
+
+    # 4-6. URL, Phone, and Bank Account detection
     sensitive_reason = find_sensitive_patterns(comment)
     if sensitive_reason:
         return PrefilterResult(True, sensitive_reason)

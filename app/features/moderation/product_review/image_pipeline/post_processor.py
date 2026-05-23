@@ -1,16 +1,16 @@
 """
-app/features/moderation/image_pipeline/post_processor.py
----------------------------------------------------------
+app/features/moderation/product_review/image_pipeline/post_processor.py
+------------------------------------------------------------------------
 Bước 3 của image pipeline: Tổng hợp kết quả từ Vision API.
 """
 
 from __future__ import annotations
 
 from app.core.logging import get_logger
-from app.features.moderation.image_pipeline.vision_client import VisionAnalysisResult
-from app.features.moderation.image_pipeline.prefilter import PrefilterImageResult
+from app.features.moderation.product_review.image_pipeline.vision_client import VisionAnalysisResult
+from app.features.moderation.product_review.image_pipeline.prefilter import PrefilterImageResult
 from app.features.moderation.schemas import ImagePipelineResult, ModerationDecision
-from app.features.moderation.text_pipeline.prefilter import find_sensitive_patterns
+from app.features.moderation.product_review.text_pipeline.prefilter import find_sensitive_patterns
 
 logger = get_logger(__name__)
 

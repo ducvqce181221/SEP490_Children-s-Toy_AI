@@ -1,6 +1,6 @@
 """
-app/features/moderation/service.py
-------------------------------------
+app/features/moderation/product_review/service.py
+--------------------------------------------------
 ModerationOrchestrator — điều phối toàn bộ pipeline kiểm duyệt.
 """
 
@@ -10,17 +10,17 @@ import asyncio
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.features.moderation.image_pipeline.post_processor import apply_vision_results
-from app.features.moderation.image_pipeline.prefilter import run_image_prefilter
-from app.features.moderation.image_pipeline.vision_client import get_vision_client
-from app.features.moderation.repository import ModerationRepository
+from app.features.moderation.product_review.image_pipeline.post_processor import apply_vision_results
+from app.features.moderation.product_review.image_pipeline.prefilter import run_image_prefilter
+from app.features.moderation.product_review.image_pipeline.vision_client import get_vision_client
+from app.features.moderation.product_review.repository import ModerationRepository
 from app.features.moderation.schemas import (
     ImagePipelineResult, ModerationDecision, ModerationStatus,
     ReviewImageRecord, ReviewRecord, TextPipelineResult,
 )
-from app.features.moderation.text_pipeline.llm_classifier import run_llm_classifier
-from app.features.moderation.text_pipeline.post_processor import PostProcessContext, apply_business_rules
-from app.features.moderation.text_pipeline.prefilter import run_prefilter
+from app.features.moderation.product_review.text_pipeline.llm_classifier import run_llm_classifier
+from app.features.moderation.product_review.text_pipeline.post_processor import PostProcessContext, apply_business_rules
+from app.features.moderation.product_review.text_pipeline.prefilter import run_prefilter
 from app.notification.service import NotificationService
 from app.utils.image_utils import load_image_from_url
 
@@ -219,21 +219,28 @@ class ModerationOrchestrator:
     ) -> None:
         final_status = _DECISION_TO_STATUS[final_decision]
         await self._repo.update_review_status(review.review_id, final_status)
+        
+        # Only log the LLM model version if it was processed by LLM (not local prefilter)
+        text_model = self._settings.groq_model if (text_result.decided_by and text_result.decided_by.startswith("llm")) else None
         await self._repo.insert_moderation_log(
             review_id=review.review_id, image_id=None, target_type="Text",
             action=_decision_to_action(text_result.decision),
             reason=text_result.reason, moderation_result=text_result.raw_llm_result,
-            ai_model_version=self._settings.groq_model,
+            ai_model_version=text_model,
         )
         for image_id, img_result in image_results:
             img_status = _DECISION_TO_STATUS[img_result.decision]
             await self._repo.update_image_status(image_id, img_status, img_result.phash)
+            
+            # Only log the vision model version if it was processed by Google Vision (not local prefilter)
+            img_model = "google-vision-v1" if (img_result.decided_by and img_result.decided_by.startswith("vision")) else None
             await self._repo.insert_moderation_log(
                 review_id=review.review_id, image_id=image_id, target_type="Image",
                 action=_decision_to_action(img_result.decision),
                 reason=img_result.reason, moderation_result=img_result.raw_vision_result,
-                ai_model_version="google-vision-v1",
+                ai_model_version=img_model,
             )
+
 
     async def _handle_pipeline_failure(self, review_id: int, error_msg: str) -> None:
         failure_count = await self._repo.get_failure_count(review_id)

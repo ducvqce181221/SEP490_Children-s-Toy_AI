@@ -1,6 +1,6 @@
 """
-app/features/moderation/text_pipeline/llm_classifier.py
----------------------------------------------------------
+app/features/moderation/product_review/text_pipeline/llm_classifier.py
+----------------------------------------------------------------------
 Bước 2 của text pipeline: Groq LLM Classifier.
 
 Gọi Groq LLM và trả về kết quả phân loại có cấu trúc.
@@ -32,7 +32,7 @@ async def run_llm_classifier(
     """
     try:
         client = get_groq_client()
-        result = await client.classify_text(comment=comment, rating=rating)
+        result = await client.classify_text(comment=comment, content_type="review", rating=rating)
     except Exception as exc:
         logger.error("LLM classification failed after retries", error=str(exc))
         return TextPipelineResult(

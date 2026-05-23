@@ -1,6 +1,6 @@
 """
-app/features/moderation/image_pipeline/prefilter.py
-----------------------------------------------------
+app/features/moderation/product_review/image_pipeline/prefilter.py
+--------------------------------------------------------------------
 Bước 1 của image pipeline: Pre-filter hoàn toàn local (Pillow + OpenCV).
 """
 

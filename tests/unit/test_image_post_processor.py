@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.features.moderation.image_pipeline.post_processor import apply_vision_results
-from app.features.moderation.image_pipeline.prefilter import PrefilterImageResult
-from app.features.moderation.image_pipeline.vision_client import VisionAnalysisResult
+from app.features.moderation.product_review.image_pipeline.post_processor import apply_vision_results
+from app.features.moderation.product_review.image_pipeline.prefilter import PrefilterImageResult
+from app.features.moderation.product_review.image_pipeline.vision_client import VisionAnalysisResult
 from app.features.moderation.schemas import ModerationDecision
 
 

@@ -12,19 +12,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from PIL import Image
 
-from app.features.moderation.image_pipeline.vision_client import VisionAnalysisResult
+from app.features.moderation.product_review.image_pipeline.vision_client import VisionAnalysisResult
 from app.features.moderation.schemas import (
     ImagePipelineResult, ModerationDecision, ModerationStatus, ReviewImageRecord,
     ReviewRecord, TextPipelineResult,
 )
-from app.features.moderation.service import ModerationOrchestrator
+from app.features.moderation.product_review.service import ModerationOrchestrator
 from app.utils.image_utils import ImageLoadResult
 
 
 @pytest.mark.asyncio
 async def test_moderation_orchestrator_batch_processing(mocker):
     # Mock settings
-    mocker.patch("app.features.moderation.service.get_settings")
+    mocker.patch("app.features.moderation.product_review.service.get_settings")
     
     # Mock Repository
     mock_repo = MagicMock()
@@ -49,21 +49,21 @@ async def test_moderation_orchestrator_batch_processing(mocker):
     mock_repo.update_image_status = AsyncMock()
     mock_repo.insert_moderation_log = AsyncMock()
     
-    mocker.patch("app.features.moderation.service.ModerationRepository", return_value=mock_repo)
+    mocker.patch("app.features.moderation.product_review.service.ModerationRepository", return_value=mock_repo)
 
     # Mock Notification
     mock_notif = MagicMock()
     mock_notif.send_manual_review_alert = AsyncMock()
-    mocker.patch("app.features.moderation.service.NotificationService", return_value=mock_notif)
+    mocker.patch("app.features.moderation.product_review.service.NotificationService", return_value=mock_notif)
 
     # Mock image loading
     mock_image = Image.new("RGB", (200, 200), (128, 128, 128))
-    mock_load = mocker.patch("app.features.moderation.service.load_image_from_url")
+    mock_load = mocker.patch("app.features.moderation.product_review.service.load_image_from_url")
     mock_load.return_value = ImageLoadResult(image=mock_image, raw_bytes=b"fakebytes", size_bytes=9999, error=None)
 
     # Mock local pre-filter
-    from app.features.moderation.image_pipeline.prefilter import PrefilterImageResult
-    mock_prefilter = mocker.patch("app.features.moderation.service.run_image_prefilter")
+    from app.features.moderation.product_review.image_pipeline.prefilter import PrefilterImageResult
+    mock_prefilter = mocker.patch("app.features.moderation.product_review.service.run_image_prefilter")
     mock_prefilter.return_value = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="mockphash")
 
     # Mock Vision Client batch call
@@ -86,7 +86,7 @@ async def test_moderation_orchestrator_batch_processing(mocker):
             detected_text="Call 0901234567 for info", # This should trigger text violation rejection
         ),
     ])
-    mocker.patch("app.features.moderation.service.get_vision_client", return_value=mock_vision_client)
+    mocker.patch("app.features.moderation.product_review.service.get_vision_client", return_value=mock_vision_client)
 
     # Mock Text Pipeline
     mock_text_res = TextPipelineResult(
