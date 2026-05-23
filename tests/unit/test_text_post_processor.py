@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.features.moderation.schemas import ModerationDecision, TextPipelineResult
-from app.features.moderation.text_pipeline.post_processor import (
+from app.features.moderation.product_review.text_pipeline.post_processor import (
     PostProcessContext,
     apply_business_rules,
 )

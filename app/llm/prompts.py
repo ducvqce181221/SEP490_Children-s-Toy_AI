@@ -29,12 +29,14 @@ OUTPUT FORMAT (strict JSON only, no markdown, no extra text):
 }"""
 
 
-def build_user_prompt(comment: str, rating: int) -> str:
-    return (
-        f"Rating: {rating}/5\n"
-        f"Review content:\n"
-        f"---\n"
-        f"{comment}\n"
-        f"---\n\n"
-        "Analyze this review and return JSON in the required format."
-    )
+def build_user_prompt(content: str, content_type: str = "review", rating: int | None = None) -> str:
+    parts = []
+    if rating is not None:
+        parts.append(f"Rating: {rating}/5")
+    parts.append(f"{content_type.capitalize()} content:")
+    parts.append("---")
+    parts.append(content)
+    parts.append("---")
+    parts.append(f"\nAnalyze this {content_type} and return JSON in the required format.")
+    return "\n".join(parts)
+

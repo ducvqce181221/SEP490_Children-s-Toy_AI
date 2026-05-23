@@ -15,8 +15,8 @@ from app.features.moderation.blog_comment.jobs import (
     run_auto_reject_manual_review_timeout_job,
     run_auto_unlock_comment_accounts_job,
 )
-from app.features.moderation.blog_comment.worker import run_blog_comment_moderation_batch
-from app.worker.moderation_worker import run_moderation_batch
+from app.worker.blog_comment_worker import run_blog_comment_moderation_batch
+from app.worker.product_review_worker import run_moderation_batch
 
 logger = get_logger(__name__)
 

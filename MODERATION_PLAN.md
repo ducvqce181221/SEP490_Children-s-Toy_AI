@@ -94,9 +94,9 @@ SEP490_Children-s-Toy_AI/
 │   │       │
 │   │       └── image_pipeline/     # [NEW] Sub-module image moderation
 │   │           ├── __init__.py
-│   │           ├── prefilter.py    # Bước 1: Pillow + OpenCV + pHash + QR detect
-│   │           ├── vision_client.py   # Bước 2: Google Cloud Vision API client
-│   │           └── post_processor.py  # Bước 3: Tổng hợp kết quả
+│   │           ├── prefilter.py    # Bước 1: Pillow + OpenCV + pHash (loại bỏ QR detect)
+│   │           ├── vision_client.py   # Bước 2: Google Cloud Vision API client (SafeSearch + Label + OCR Batch)
+│   │           └── post_processor.py  # Bước 3: Tổng hợp kết quả (SafeSearch + Label + OCR Text check)
 │   │
 │   ├── llm/
 │   │   ├── client.py               # Groq async client wrapper (with retry)
@@ -242,10 +242,11 @@ SEP490_Children-s-Toy_AI/
 - Implement bằng `tenacity` library (async-compatible)
 - Sau 5 lần thất bại trên cùng 1 record → set ManualReview + ghi log + gửi alert
 
-### 4.7 Image Pipeline — Google Vision gọi 1 lần
+### 4.7 Image Pipeline — Google Vision gọi Batch & OCR Text
 
-- Gộp `SAFE_SEARCH_DETECTION` và `LABEL_DETECTION` trong 1 API call duy nhất (2 units)
-- Dùng `google-cloud-vision` SDK async
+- Gộp `SAFE_SEARCH_DETECTION`, `LABEL_DETECTION` và `TEXT_DETECTION` (OCR) trong một yêu cầu duy nhất cho mỗi ảnh (3 units).
+- Các ảnh vượt qua local pre-filter được gửi song song dưới dạng **Batch Request** để giảm số lượng kết nối mạng và tối ưu thời gian phản hồi.
+- Dùng `google-cloud-vision` SDK, thực hiện gọi hàm batch blocking chạy trong thread pool (`asyncio.to_thread`) để tích hợp mượt mà với asyncio.
 
 ### 4.8 pHash Storage
 
@@ -458,8 +459,8 @@ POST /moderation/trigger        → Manual trigger (dùng để test, chỉ gọ
 | `text_pipeline/prefilter.py`       | URL detection, phone regex, bank account regex, short text, spam chars                                |
 | `text_pipeline/llm_classifier.py`  | Mock Groq response, invalid JSON fallback, timeout handling                                           |
 | `text_pipeline/post_processor.py`  | Confidence threshold, health_concern flag, account rejected count, new product                        |
-| `image_pipeline/prefilter.py`      | Invalid format, too small/large, black image, uniform image, blur detection, QR code, pHash duplicate |
-| `image_pipeline/post_processor.py` | Adult/violence detection, no toy label                                                                |
+| `image_pipeline/prefilter.py`      | Invalid format, too small/large, black image, uniform image, blur detection, pHash duplicate          |
+| `image_pipeline/post_processor.py` | Adult/violence detection, no toy label, OCR text detection (URL, phone, bank account)                 |
 | `utils/retry.py`                   | Max retries exceeded, backoff timing                                                                  |
 
 ### 7.2 Integration Tests
