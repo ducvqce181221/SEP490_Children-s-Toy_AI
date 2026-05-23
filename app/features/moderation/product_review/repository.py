@@ -1,6 +1,6 @@
 """
-app/features/moderation/repository.py
---------------------------------------
+app/features/moderation/product_review/repository.py
+------------------------------------------------------
 Database access layer for the moderation feature.
 All SQL against SQL Server via aioodbc. No ORM.
 """

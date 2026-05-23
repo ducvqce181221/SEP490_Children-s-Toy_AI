@@ -1,3 +1,9 @@
+"""
+app/worker/blog_comment_worker.py
+---------------------------------
+Worker for processing pending blog comments.
+"""
+
 from __future__ import annotations
 
 import asyncio

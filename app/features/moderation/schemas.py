@@ -19,6 +19,8 @@ class ModerationStatus(StrEnum):
     APPROVED = "Approved"
     REJECTED = "Rejected"
     MANUAL_REVIEW = "ManualReview"
+    FAILED = "Failed"
+
 
 
 class ModerationDecision(StrEnum):
@@ -83,3 +85,25 @@ class NotificationPayload(BaseModel):
     title: str
     message: str
     idempotency_key: str
+
+
+class BlogCommentTargetType(StrEnum):
+    COMMENT = "Comment"
+    REPLY = "Reply"
+
+
+class BlogCommentRecord(BaseModel):
+    target_type: BlogCommentTargetType
+    target_id: int
+    account_id: int
+    comment: str | None = None
+    moderation_status: ModerationStatus
+    retry_count: int = Field(ge=0)
+    last_retry_at: datetime | None = None
+    created_at: datetime
+
+
+class BlogCommentReason(BaseModel):
+    ban_reason_id: int
+    content: str
+

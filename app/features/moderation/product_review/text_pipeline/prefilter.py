@@ -1,6 +1,6 @@
 r"""
-app/features/moderation/text_pipeline/prefilter.py
---------------------------------------------------
+app/features/moderation/product_review/text_pipeline/prefilter.py
+------------------------------------------------------------------
 Bước 1 của text pipeline: Rule-based pre-filter (không dùng AI, < 1ms).
 
 Reject ngay lập tức nếu:
@@ -14,6 +14,7 @@ Reject ngay lập tức nếu:
 from __future__ import annotations
 
 import re
+from app.utils.text_utils import has_hard_profanity
 
 
 # ── Precompiled patterns ───────────────────────────────────────────────────────
@@ -47,6 +48,25 @@ class PrefilterResult:
 
     def __repr__(self) -> str:
         return f"PrefilterResult(rejected={self.rejected}, reason={self.reason!r})"
+
+
+def find_sensitive_patterns(text: str) -> str | None:
+    """
+    Check if the text contains sensitive patterns like URLs, phone numbers, or bank accounts.
+    Returns the failure reason if matched, or None if clean.
+    """
+    if _URL_PATTERN.search(text):
+        return "Chứa URL hoặc link rút gọn"
+
+    if _VN_PHONE_PATTERN.search(text):
+        return "Chứa số điện thoại Việt Nam"
+
+    # Exclude phone-like matches already caught above by checking isolated groups
+    bank_matches = _BANK_ACCOUNT_PATTERN.findall(text)
+    if bank_matches:
+        return "Chứa dãy số nghi là số tài khoản ngân hàng"
+
+    return None
 
 
 def run_prefilter(comment: str) -> PrefilterResult:
@@ -83,21 +103,13 @@ def run_prefilter(comment: str) -> PrefilterResult:
                 "Spam ký tự lặp: hơn 70% nội dung là cùng một ký tự",
             )
 
-    # 3. URL detection
-    if _URL_PATTERN.search(comment):
-        return PrefilterResult(True, "Chứa URL hoặc link rút gọn")
+    # 3. Profanity detection
+    if has_hard_profanity(comment):
+        return PrefilterResult(True, "Chứa từ ngữ thô tục cực đoan (chặn tự động)")
 
-    # 4. Vietnamese phone number
-    if _VN_PHONE_PATTERN.search(comment):
-        return PrefilterResult(True, "Chứa số điện thoại Việt Nam")
-
-    # 5. Bank account number
-    # Exclude phone-like matches already caught above by checking isolated groups
-    bank_matches = _BANK_ACCOUNT_PATTERN.findall(comment)
-    if bank_matches:
-        return PrefilterResult(
-            True,
-            "Chứa dãy số nghi là số tài khoản ngân hàng",
-        )
+    # 4-6. URL, Phone, and Bank Account detection
+    sensitive_reason = find_sensitive_patterns(comment)
+    if sensitive_reason:
+        return PrefilterResult(True, sensitive_reason)
 
     return PrefilterResult(False, "")

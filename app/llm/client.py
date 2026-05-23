@@ -57,8 +57,13 @@ class _BaseModerationClient:
         max_wait=8.0,
         exceptions=(APIConnectionError, APITimeoutError),
     )
-    async def classify_text(self, comment: str, rating: int) -> dict[str, Any]:
-        user_message = build_user_prompt(comment=comment, rating=rating)
+    async def classify_text(
+        self,
+        comment: str,
+        content_type: str = "review",
+        rating: int | None = None,
+    ) -> dict[str, Any]:
+        user_message = build_user_prompt(content=comment, content_type=content_type, rating=rating)
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
@@ -84,7 +89,18 @@ class _BaseModerationClient:
 
     def _parse_response(self, raw: str) -> dict[str, Any]:
         try:
-            data = json.loads(raw)
+            # Clean markdown code block fences if present
+            raw_clean = raw.strip()
+            if raw_clean.startswith("```"):
+                # strip block fences
+                lines = raw_clean.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                raw_clean = "\n".join(lines).strip()
+
+            data = json.loads(raw_clean)
             required = {"decision", "confidence", "category", "flags", "reason"}
             if not required.issubset(data.keys()):
                 raise ValueError(f"Missing keys: {required - data.keys()}")
@@ -105,6 +121,7 @@ class _BaseModerationClient:
                 error=str(exc),
             )
             return {**_FALLBACK_RESULT, "flags": ["llm_parse_error"]}
+
 
 
 class GroqClient(_BaseModerationClient):
@@ -147,8 +164,13 @@ class BlogDeepSeekClient(_BaseModerationClient):
         max_wait=8.0,
         exceptions=(httpx.ConnectError, httpx.TimeoutException),
     )
-    async def classify_text(self, comment: str, rating: int) -> dict[str, Any]:
-        user_message = build_user_prompt(comment=comment, rating=rating)
+    async def classify_text(
+        self,
+        comment: str,
+        content_type: str = "review",
+        rating: int | None = None,
+    ) -> dict[str, Any]:
+        user_message = build_user_prompt(content=comment, content_type=content_type, rating=rating)
         payload = {
             "model": self._model,
             "messages": [
