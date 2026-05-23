@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.core.logging import get_logger
 from app.features.moderation.blog_comment.notification_service import BlogCommentNotificationService
 from app.features.moderation.blog_comment.repository import BlogCommentModerationRepository
-from app.features.moderation.blog_comment.schemas import BlogCommentStatus
+from app.features.moderation.schemas import ModerationStatus
 from app.features.moderation.blog_comment.violation_service import BlogCommentViolationService
 
 logger = get_logger(__name__)
@@ -22,7 +22,7 @@ async def run_auto_reject_manual_review_timeout_job() -> int:
         await repo.update_target_status(
             target_type=record.target_type,
             target_id=record.target_id,
-            status=BlogCommentStatus.REJECTED,
+            status=ModerationStatus.REJECTED,
         )
         await repo.insert_moderation_log(
             record=record,

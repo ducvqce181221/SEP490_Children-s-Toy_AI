@@ -7,7 +7,7 @@ Unit tests for text_pipeline/prefilter.py (no external deps, pure logic).
 from __future__ import annotations
 
 import pytest
-from app.features.moderation.text_pipeline.prefilter import run_prefilter
+from app.features.moderation.product_review.text_pipeline.prefilter import run_prefilter
 
 
 class TestRunPrefilter:
@@ -88,3 +88,9 @@ class TestRunPrefilter:
     def test_normal_number_not_rejected(self):
         result = run_prefilter("Mã đơn hàng là 12345678 đang giao")
         assert not result.rejected
+
+    def test_hard_profanity_rejected(self):
+        result = run_prefilter("Đồ chơi như con cặc")
+        assert result.rejected
+        assert "thô tục" in result.reason
+

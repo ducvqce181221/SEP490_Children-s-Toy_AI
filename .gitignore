@@ -132,3 +132,7 @@ cython_debug/
 *.swp
 *.swo
 *~
+
+ai-moderation-496806-05e2636961b1.json
+MODERATION_PLAN.md
+my-plan.md

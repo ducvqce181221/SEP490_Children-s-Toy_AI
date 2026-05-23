@@ -17,9 +17,9 @@ from app.features.moderation.blog_comment.jobs import (
     run_auto_unlock_comment_accounts_job,
 )
 from app.features.moderation.blog_comment.repository import BlogCommentModerationRepository
-from app.features.moderation.blog_comment.schemas import BlogCommentTargetType
+from app.features.moderation.schemas import BlogCommentTargetType
 from app.features.moderation.blog_comment.service import BlogCommentModerationService
-from app.features.moderation.blog_comment.worker import run_blog_comment_moderation_batch
+from app.worker.blog_comment_worker import run_blog_comment_moderation_batch
 from app.features.blog_content.schemas import (
     BlogContentGenerateRequest,
     BlogContentGenerateResponse,
@@ -28,7 +28,7 @@ from app.features.blog_content.service import (
     BlogContentGenerationError,
     generate_blog_content,
 )
-from app.worker.moderation_worker import run_moderation_batch
+from app.worker.product_review_worker import run_moderation_batch
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/moderation", tags=["moderation"])

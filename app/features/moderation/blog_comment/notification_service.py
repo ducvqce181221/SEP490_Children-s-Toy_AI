@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.features.moderation.blog_comment.repository import BlogCommentModerationRepository
-from app.features.moderation.blog_comment.schemas import BlogCommentRecord
+from app.features.moderation.schemas import BlogCommentRecord
 
 
 class BlogCommentNotificationService:

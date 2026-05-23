@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from app.features.moderation.image_pipeline.prefilter import run_image_prefilter
+from app.features.moderation.product_review.image_pipeline.prefilter import run_image_prefilter
 from app.features.moderation.schemas import ModerationDecision
 
 

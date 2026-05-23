@@ -1,6 +1,6 @@
 """
-app/features/moderation/text_pipeline/post_processor.py
----------------------------------------------------------
+app/features/moderation/product_review/text_pipeline/post_processor.py
+----------------------------------------------------------------------
 Bước 3 của text pipeline: Post-process Business Rules.
 
 Override quyết định của AI nếu:
