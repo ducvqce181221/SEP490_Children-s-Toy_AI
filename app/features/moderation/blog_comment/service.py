@@ -5,7 +5,6 @@ import unicodedata
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.features.moderation.blog_comment.notification_service import BlogCommentNotificationService
 from app.features.moderation.blog_comment.reason_mapper import (
     AI_UNAVAILABLE_REASON,
     map_ai_category_to_reason_content,
@@ -92,7 +91,6 @@ _VIOLATION_REASON_TOKENS: tuple[str, ...] = (
 class BlogCommentModerationService:
     def __init__(self) -> None:
         self._repo = BlogCommentModerationRepository()
-        self._notif = BlogCommentNotificationService()
         self._violation = BlogCommentViolationService()
         self._retry_policy = BlogCommentRetryPolicy()
         self._settings = get_settings()
@@ -216,7 +214,7 @@ class BlogCommentModerationService:
         )
         await self._repo.insert_moderation_log(
             record=record,
-            action="Approved",
+            action="AutoApproved",
             moderator_type="AI",
             confidence_score=ai_result.confidence,
             moderation_result=ai_result.raw,
@@ -263,8 +261,6 @@ class BlogCommentModerationService:
             confidence_score=ai_result.confidence,
             moderation_result=ai_result.raw,
         )
-        final_reason = reason.content if reason else "Content unsuitable for children"
-        await self._notif.notify_rejected(record, final_reason)
         await self._violation.register_violation_and_lock_if_needed(record.account_id)
 
     async def _handle_ai_error(self, record: BlogCommentRecord, error_text: str) -> None:
@@ -278,12 +274,6 @@ class BlogCommentModerationService:
             status=BlogCommentStatus.PENDING,
             retry_count=new_retry_count,
         )
-        await self._repo.insert_moderation_log(
-            record=record,
-            action="Retry",
-            moderator_type="SYSTEM",
-            moderation_result={"error": error_text, "retry_count": new_retry_count},
-        )
 
     async def _mark_failed(self, record: BlogCommentRecord, retry_count: int, error_text: str) -> None:
         reason = await self._repo.get_reason_by_content(AI_UNAVAILABLE_REASON)
@@ -296,7 +286,7 @@ class BlogCommentModerationService:
         await self._repo.insert_moderation_log(
             record=record,
             action="Failed",
-            moderator_type="SYSTEM",
+            moderator_type="AI",
             ban_reason_id=reason.ban_reason_id if reason else None,
             moderation_result={"error": error_text, "retry_count": retry_count},
         )
