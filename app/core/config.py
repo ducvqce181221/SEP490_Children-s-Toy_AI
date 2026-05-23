@@ -73,23 +73,23 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("BLOG_DEEPSEEK_BASE_URL", "DEEPSEEK_BASE_URL"),
     )
     blog_deepseek_temperature: float = Field(
-        default=0.0,
+        default=0.85,
         ge=0.0,
         le=2.0,
-        validation_alias=AliasChoices("BLOG_DEEPSEEK_TEMPERATURE", "GROQ_TEMPERATURE"),
+        validation_alias=AliasChoices("BLOG_DEEPSEEK_TEMPERATURE"),
     )
     blog_deepseek_max_tokens: int = Field(
-        default=1800,
+        default=2200,
         gt=0,
-        validation_alias=AliasChoices("BLOG_DEEPSEEK_MAX_TOKENS", "GROQ_MAX_TOKENS"),
+        validation_alias=AliasChoices("BLOG_DEEPSEEK_MAX_TOKENS"),
     )
     blog_deepseek_timeout_seconds: float = Field(
-        default=20.0,
+        default=30.0,
         gt=0.0,
         validation_alias=AliasChoices("BLOG_DEEPSEEK_TIMEOUT_SECONDS"),
     )
     blog_deepseek_retry_attempts: int = Field(
-        default=1,
+        default=3,
         ge=1,
         le=5,
         validation_alias=AliasChoices("BLOG_DEEPSEEK_RETRY_ATTEMPTS"),
