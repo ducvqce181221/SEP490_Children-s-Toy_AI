@@ -318,6 +318,22 @@ class BlogCommentModerationRepository:
             return None
         return BlogCommentReason(ban_reason_id=int(row[0]), content=str(row[1]))
 
+    async def get_default_rejection_reason(self) -> BlogCommentReason | None:
+        sql = """
+            SELECT TOP 1 [BanReasonID], [Content]
+            FROM [dbo].[BlogCommentBanReasons]
+            ORDER BY
+                CASE WHEN [Content] = N'Content unsuitable for children' THEN 0 ELSE 1 END,
+                [BanReasonID]
+        """
+        async with get_connection() as conn:
+            async with get_cursor(conn) as cur:
+                await cur.execute(sql)
+                row = await cur.fetchone()
+        if not row:
+            return None
+        return BlogCommentReason(ban_reason_id=int(row[0]), content=str(row[1]))
+
     async def update_target_status(
         self,
         *,

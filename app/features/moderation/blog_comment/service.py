@@ -265,8 +265,10 @@ class BlogCommentModerationService:
         )
         reason = await self._repo.get_reason_by_content(reason_content or "")
         if reason is None:
-            fallback_reason = "Content unsuitable for children"
-            reason = await self._repo.get_reason_by_content(fallback_reason)
+            reason = await self._repo.get_default_rejection_reason()
+        if reason is None:
+            await self._send_to_manual_review(record, ai_result)
+            return
         await self._repo.update_target_status(
             target_type=record.target_type,
             target_id=record.target_id,
