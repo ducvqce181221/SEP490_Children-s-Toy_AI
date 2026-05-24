@@ -12,14 +12,9 @@ from pydantic import BaseModel
 from app.core.config import get_settings
 from app.core.database import get_connection, get_cursor
 from app.core.logging import get_logger
-from app.features.moderation.blog_comment.jobs import (
-    run_auto_reject_manual_review_timeout_job,
-    run_auto_unlock_comment_accounts_job,
-)
 from app.features.moderation.blog_comment.repository import BlogCommentModerationRepository
 from app.features.moderation.schemas import BlogCommentTargetType
 from app.features.moderation.blog_comment.service import BlogCommentModerationService
-from app.worker.blog_comment_worker import run_blog_comment_moderation_batch
 from app.features.blog_content.schemas import (
     BlogContentGenerateRequest,
     BlogContentGenerateResponse,
@@ -154,24 +149,6 @@ async def get_blog_comment_moderation_stats() -> BlogCommentModerationStatsRespo
         failed=counts["Failed"],
         total=total,
     )
-
-
-@router.post("/blog-comments/trigger", response_model=TriggerResponse, dependencies=[Depends(verify_internal_key)])
-async def trigger_blog_comment_moderation() -> TriggerResponse:
-    processed = await run_blog_comment_moderation_batch()
-    return TriggerResponse(message="Blog comment moderation batch complete", processed=processed)
-
-
-@router.post("/blog-comments/jobs/manual-review-timeout", response_model=TriggerResponse, dependencies=[Depends(verify_internal_key)])
-async def trigger_manual_review_timeout_job() -> TriggerResponse:
-    processed = await run_auto_reject_manual_review_timeout_job()
-    return TriggerResponse(message="Manual review timeout job complete", processed=processed)
-
-
-@router.post("/blog-comments/jobs/unlock-accounts", response_model=TriggerResponse, dependencies=[Depends(verify_internal_key)])
-async def trigger_unlock_accounts_job() -> TriggerResponse:
-    processed = await run_auto_unlock_comment_accounts_job()
-    return TriggerResponse(message="Unlock comment accounts job complete", processed=processed)
 
 
 @router.post(
