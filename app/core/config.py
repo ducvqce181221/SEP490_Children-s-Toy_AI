@@ -105,10 +105,6 @@ class Settings(BaseSettings):
     max_concurrent_reviews: int = Field(default=5, gt=0)
     max_retry_attempts: int = Field(default=3, ge=1)
     max_failure_count_before_alert: int = Field(default=5, ge=1)
-    blog_comment_worker_enabled: bool = True
-    blog_comment_poll_interval_seconds: int = Field(default=30, gt=0)
-    blog_comment_batch_size: int = Field(default=20, gt=0)
-    blog_comment_max_concurrent: int = Field(default=5, gt=0)
     blog_comment_retry_interval_minutes: int = Field(default=5, gt=0)
     blog_comment_manual_review_timeout_hours: int = Field(default=24, gt=0)
     blog_comment_lock_days: int = Field(default=7, gt=0)
