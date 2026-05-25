@@ -12,11 +12,7 @@ class BlogCommentViolationService:
         self._settings = get_settings()
 
     async def register_violation_and_lock_if_needed(self, account_id: int) -> None:
-        await self._repo.increment_violation(account_id)
-        count = await self._repo.count_violations_in_window(
-            account_id,
-            days=self._settings.blog_comment_violation_window_days,
-        )
+        count = await self._repo.increment_violation(account_id)
         if count < self._settings.blog_comment_violation_threshold:
             return
         await self._repo.lock_comment_privilege(

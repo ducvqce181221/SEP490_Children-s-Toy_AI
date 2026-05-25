@@ -513,24 +513,6 @@ class BlogCommentModerationRepository:
                 row = await cur.fetchone()
         return int(row[0] if row else 0)
 
-    async def count_violations_in_window(self, account_id: int, *, days: int) -> int:
-        since = datetime.now(tz=timezone.utc) - timedelta(days=days)
-        sql = """
-            SELECT COUNT(*)
-            FROM [dbo].[BlogCommentModerationLogs]
-            WHERE [Action] = 'Rejected'
-              AND [CreatedAt] >= ?
-              AND (
-                    [CommentID] IN (SELECT [ReviewBlogID] FROM [dbo].[ReviewBlogs] WHERE [AccountID] = ?)
-                 OR [ReplyID]   IN (SELECT [ReplyBlogID] FROM [dbo].[ReviewBlogReplies] WHERE [AccountID] = ?)
-              )
-        """
-        async with get_connection() as conn:
-            async with get_cursor(conn) as cur:
-                await cur.execute(sql, since, account_id, account_id)
-                row = await cur.fetchone()
-        return int(row[0] if row else 0)
-
     async def lock_comment_privilege(self, account_id: int, *, lock_days: int) -> None:
         await self.get_or_create_violation_count(account_id)
         sql = """

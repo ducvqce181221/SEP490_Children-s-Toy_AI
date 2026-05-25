@@ -108,8 +108,7 @@ class Settings(BaseSettings):
     blog_comment_retry_interval_minutes: int = Field(default=5, gt=0)
     blog_comment_manual_review_timeout_hours: int = Field(default=24, gt=0)
     blog_comment_lock_days: int = Field(default=7, gt=0)
-    blog_comment_violation_window_days: int = Field(default=15, gt=0)
-    blog_comment_violation_threshold: int = Field(default=3, gt=0)
+    blog_comment_violation_threshold: int = Field(default=20, gt=0)
 
     # ── Image thresholds ─────────────────────────────────────────────────
     image_min_size_kb: int = Field(default=10, gt=0)
