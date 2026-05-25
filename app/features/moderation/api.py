@@ -17,6 +17,8 @@ from app.features.moderation.schemas import BlogCommentTargetType
 from app.features.moderation.blog_comment.service import BlogCommentModerationService
 from app.features.blog_content.schemas import (
     BlogContentGenerateRequest,
+    BlogContentGenerateEndpointResponse,
+    BlogContentBlockedResponse,
     BlogContentGenerateResponse,
 )
 from app.features.blog_content.service import (
@@ -181,10 +183,10 @@ async def moderate_one_blog_comment(payload: ModerateOneRequest) -> ModerateOneR
 
 @router.post(
     "/blog-content/generate",
-    response_model=BlogContentGenerateResponse,
+    response_model=BlogContentGenerateEndpointResponse,
     dependencies=[Depends(verify_internal_key)],
 )
-async def generate_blog_content_endpoint(payload: BlogContentGenerateRequest) -> BlogContentGenerateResponse:
+async def generate_blog_content_endpoint(payload: BlogContentGenerateRequest) -> BlogContentGenerateEndpointResponse:
     logger.info(
         "Received blog content generation request",
         action=payload.action,
@@ -193,7 +195,7 @@ async def generate_blog_content_endpoint(payload: BlogContentGenerateRequest) ->
         category_id=payload.defaultCategoryId,
     )
     try:
-        title, content = await generate_blog_content(
+        generated = await generate_blog_content(
             action=payload.action,
             title=payload.title,
             description=payload.description,
@@ -202,6 +204,15 @@ async def generate_blog_content_endpoint(payload: BlogContentGenerateRequest) ->
             category_id=payload.defaultCategoryId,
             source_content=payload.sourceContent,
         )
+        if isinstance(generated, dict) and generated.get("status") == "blocked":
+            logger.info(
+                "Blog content blocked",
+                violation_type=generated.get("violation_type"),
+                violated_keyword=generated.get("violated_keyword"),
+            )
+            return BlogContentBlockedResponse.model_validate(generated)
+
+        title, content = generated
         logger.info(
             "Blog content generation completed",
             title_len=len(title or ""),

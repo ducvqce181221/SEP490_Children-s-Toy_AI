@@ -3,6 +3,7 @@
 import json
 import re
 import hashlib
+import unicodedata
 from pathlib import Path
 
 import httpx
@@ -18,6 +19,153 @@ logger = get_logger(__name__)
 
 class BlogContentGenerationError(RuntimeError):
     pass
+
+
+BLOCKED_KEYWORDS: dict[str, list[str]] = {
+    "brand_external": [
+        "mykingdom", "ti ni", "lazada", "shopee",
+        "tiki", "sendo", "amazon", "bibo mart", "fahasa",
+    ],
+    "topic_restricted": [
+        "chinh tri", "ton giao", "bao luc", "co bac",
+        "vu khi", "noi dung nguoi lon", "chat kich thich",
+    ],
+}
+
+WHITELIST = ["google", "ghn", "giao hang nhanh", "children s toy store", "children toy store"]
+DEFAULT_BLOCK_SUGGESTIONS = [
+    "Đồ chơi STEM phù hợp cho bé theo độ tuổi",
+    "Hướng dẫn chọn quà sinh nhật cho trẻ",
+    "Top đồ chơi sáng tạo được yêu thích nhất",
+    "Kinh nghiệm mua đồ chơi online an toàn cho phụ huynh",
+]
+
+
+def _build_contextual_fallback_suggestions(title: str, content: str) -> list[str]:
+    combined = _normalize_for_check(f"{title} {content}")
+    if any(token in combined for token in ["review", "danh gia", "so sanh"]):
+        return [
+            "Khám phá Children's Toy Store - nền tảng đồ chơi trẻ em trực tuyến cho gia đình hiện đại",
+            "Review top đồ chơi bán chạy tại Children's Toy Store theo từng nhóm tuổi",
+            "So sánh các nhóm đồ chơi giáo dục giúp bé phát triển tư duy và sáng tạo",
+            "Kinh nghiệm chọn đồ chơi online an toàn cho phụ huynh có con nhỏ",
+        ]
+    if any(token in combined for token in ["mua", "buy", "gia", "price", "khuyen mai", "voucher"]):
+        return [
+            "Hướng dẫn mua đồ chơi tại Children's Toy Store nhanh gọn và an toàn",
+            "Top sản phẩm đáng mua tại Children's Toy Store cho bé theo độ tuổi",
+            "Mẹo chọn đồ chơi giáo dục phù hợp ngân sách mà vẫn hiệu quả cho trẻ",
+            "Bí quyết mua đồ chơi online thông minh cho phụ huynh bận rộn",
+        ]
+    return [
+        "Khám phá Children's Toy Store và các tính năng hỗ trợ mua đồ chơi cho gia đình",
+        "Gợi ý đồ chơi nổi bật tại Children's Toy Store theo nhu cầu phát triển của bé",
+        "Top hoạt động chơi mà học giúp trẻ phát triển kỹ năng toàn diện tại nhà",
+        "Kinh nghiệm chọn đồ chơi đúng độ tuổi để phụ huynh mua sắm an tâm hơn",
+    ]
+
+
+def _normalize_for_check(value: str) -> str:
+    lowered = (value or "").lower()
+    no_diacritic = "".join(
+        ch for ch in unicodedata.normalize("NFKD", lowered) if not unicodedata.combining(ch)
+    )
+    alpha_num_space = re.sub(r"[^a-z0-9\s]", " ", no_diacritic)
+    return re.sub(r"\s+", " ", alpha_num_space).strip()
+
+
+def pre_check(topic: str) -> dict[str, str | list[str]] | None:
+    normalized = f" {_normalize_for_check(topic)} "
+    for w in WHITELIST:
+        normalized = normalized.replace(f" {_normalize_for_check(w)} ", " ")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+
+    for violation_type, keywords in BLOCKED_KEYWORDS.items():
+        for kw in keywords:
+            normalized_kw = _normalize_for_check(kw)
+            if f" {normalized_kw} " in f" {normalized} ":
+                return {
+                    "status": "blocked",
+                    "violation_type": violation_type,
+                    "violated_keyword": kw,
+                    "reason": f"Chủ đề đề cập đến '{kw}' không thuộc phạm vi Children's Toy Store.",
+                    "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+                }
+    return None
+
+
+async def generate_smart_suggestions(
+    title: str,
+    content: str,
+    violated_keyword: str,
+    violation_reason: str,
+) -> list[str]:
+    suggestion_prompt = f"""
+Người dùng vừa yêu cầu tạo blog với thông tin sau:
+- Tiêu đề (title): {title}
+- Nội dung mô tả (content): {content}
+
+Yêu cầu này bị từ chối vì lý do: {violation_reason}
+Từ vi phạm: {violated_keyword}
+
+Nhiệm vụ của bạn: Tạo đúng 4 gợi ý chủ đề thay thế PHÙ HỢP cho website Children's Toy Store.
+
+NGUYÊN TẮC GỢI Ý:
+1. Phân tích ý định của người dùng từ title và content họ đã nhập.
+2. Giữ lại tinh thần/mục đích của yêu cầu gốc nhưng chuyển hướng về Children's Toy Store.
+3. Các gợi ý phải đa dạng:
+   - 1 gợi ý: giới thiệu tính năng/dịch vụ của Children's Toy Store (thay thế trực tiếp)
+   - 1 gợi ý: cùng thể loại nội dung nhưng về sản phẩm của Children's Toy Store
+   - 1 gợi ý: chủ đề liên quan đến đồ chơi/giáo dục trẻ em
+   - 1 gợi ý: góc độ khác của cùng chủ đề, phù hợp cho phụ huynh
+
+Trả về JSON theo đúng format, không thêm text nào khác:
+{{"suggestions": ["gợi ý 1", "gợi ý 2", "gợi ý 3", "gợi ý 4"]}}
+"""
+    settings = get_settings()
+    contextual_fallback = _build_contextual_fallback_suggestions(title, content)
+    if not settings.blog_deepseek_api_key:
+        return contextual_fallback[:4]
+
+    model = settings.blog_deepseek_model or "deepseek-chat"
+    base_url = (settings.blog_deepseek_base_url or "https://api.deepseek.com").rstrip("/")
+    endpoints = [f"{base_url}/chat/completions", f"{base_url}/v1/chat/completions"]
+    headers = {
+        "Authorization": f"Bearer {settings.blog_deepseek_api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": suggestion_prompt}],
+        "max_tokens": 300,
+        "temperature": 0.8,
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.blog_deepseek_timeout_seconds) as client:
+            for endpoint in endpoints:
+                resp = await client.post(endpoint, json=payload, headers=headers)
+                if resp.status_code >= 400:
+                    continue
+
+                body = resp.json()
+                raw = str(body["choices"][0]["message"]["content"]).strip()
+                raw = raw.replace("```json", "").replace("```", "").strip()
+                parsed = json.loads(raw)
+                suggestions = parsed.get("suggestions", [])
+                if not isinstance(suggestions, list):
+                    continue
+
+                cleaned = [str(item).strip() for item in suggestions if str(item).strip()]
+                if len(cleaned) >= 4:
+                    return cleaned[:4]
+                if cleaned:
+                    return (cleaned + contextual_fallback)[:4]
+
+        return contextual_fallback[:4]
+    except Exception:
+        return contextual_fallback[:4]
 
 
 def _load_precontent_rules() -> str:
@@ -479,7 +627,7 @@ async def generate_blog_content(
     tone: str,
     category_id: int,
     source_content: str | None,
-) -> tuple[str, str]:
+) -> tuple[str, str] | dict[str, str | list[str]]:
     logger.info(
         "AI blog generation requested",
         action=action,
@@ -488,6 +636,25 @@ async def generate_blog_content(
         has_source=bool(source_content),
         category_id=category_id,
     )
+
+    moderation_input = "\n".join(
+        [title or "", description or "", prompt_structure or "", source_content or ""]
+    )
+    violation = pre_check(moderation_input)
+    if violation:
+        smart_suggestions = await generate_smart_suggestions(
+            title=title,
+            content=(description or prompt_structure or "").strip(),
+            violated_keyword=str(violation.get("violated_keyword", "")),
+            violation_reason=str(violation.get("reason", "")),
+        )
+        violation["suggestions"] = smart_suggestions[:4] if smart_suggestions else DEFAULT_BLOCK_SUGGESTIONS[:4]
+        logger.info(
+            "Blog generation blocked by pre-check",
+            violation_type=violation.get("violation_type"),
+            violated_keyword=violation.get("violated_keyword"),
+        )
+        return violation
 
     settings = get_settings()
     if not settings.blog_deepseek_api_key:
