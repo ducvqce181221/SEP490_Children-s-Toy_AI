@@ -185,3 +185,17 @@ class ModerationRepository:
                 await cur.execute(sql)
                 rows = await cur.fetchall()
         return [{"account_id": row[0], "role_id": row[1]} for row in rows]
+
+    async def get_reviewer_name_by_review_id(self, review_id: int) -> str:
+        sql = """
+            SELECT a.[AccountName]
+            FROM [dbo].[ReviewProducts] rp
+            JOIN [dbo].[Accounts] a ON rp.[AccountID] = a.[AccountID]
+            WHERE rp.[ReviewID] = ?
+        """
+        async with get_connection() as conn:
+            async with get_cursor(conn) as cur:
+                await cur.execute(sql, review_id)
+                row = await cur.fetchone()
+        return row[0] if row else "Khách hàng"
+

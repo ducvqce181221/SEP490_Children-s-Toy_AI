@@ -48,13 +48,17 @@ async def test_moderation_orchestrator_batch_processing(mocker):
     mock_repo.update_review_status = AsyncMock()
     mock_repo.update_image_status = AsyncMock()
     mock_repo.insert_moderation_log = AsyncMock()
+    mock_repo.get_reviewer_name_by_review_id = AsyncMock(return_value="Khách hàng")
     
     mocker.patch("app.features.moderation.product_review.service.ModerationRepository", return_value=mock_repo)
 
     # Mock Notification
     mock_notif = MagicMock()
     mock_notif.send_manual_review_alert = AsyncMock()
+    mock_notif.send_customer_rejection_notification = AsyncMock()
     mocker.patch("app.features.moderation.product_review.service.NotificationService", return_value=mock_notif)
+
+
 
     # Mock image loading
     mock_image = Image.new("RGB", (200, 200), (128, 128, 128))

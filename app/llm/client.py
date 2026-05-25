@@ -101,18 +101,39 @@ class _BaseModerationClient:
                 raw_clean = "\n".join(lines).strip()
 
             data = json.loads(raw_clean)
-            required = {"decision", "confidence", "category", "flags", "reason"}
-            if not required.issubset(data.keys()):
-                raise ValueError(f"Missing keys: {required - data.keys()}")
-            data["decision"] = str(data["decision"]).upper()
-            if data["decision"] not in {"APPROVED", "REJECTED", "MANUAL_REVIEW"}:
-                raise ValueError(f"Invalid decision: {data['decision']}")
-            data["confidence"] = float(data["confidence"])
-            if not 0.0 <= data["confidence"] <= 1.0:
-                data["confidence"] = 0.0
-            if not isinstance(data["flags"], list):
-                data["flags"] = []
-            return data
+            
+            # Robust, forgiving extraction
+            decision_val = data.get("decision", "MANUAL_REVIEW")
+            decision_str = str(decision_val).upper()
+            if decision_str not in {"APPROVED", "REJECTED", "MANUAL_REVIEW"}:
+                decision_str = "MANUAL_REVIEW"
+                
+            confidence_val = data.get("confidence")
+            try:
+                confidence = float(confidence_val) if confidence_val is not None else (1.0 if decision_str == "APPROVED" else 0.5)
+            except (ValueError, TypeError):
+                confidence = 0.5
+                
+            if not 0.0 <= confidence <= 1.0:
+                confidence = 0.5
+                
+            category = str(data.get("category", "ambiguous")).lower()
+            
+            flags = data.get("flags")
+            if not isinstance(flags, list):
+                flags = []
+            else:
+                flags = [str(f) for f in flags]
+                
+            reason = str(data.get("reason", ""))
+            
+            return {
+                "decision": decision_str,
+                "confidence": confidence,
+                "category": category,
+                "flags": flags,
+                "reason": reason,
+            }
         except (json.JSONDecodeError, ValueError, KeyError) as exc:
             logger.warning(
                 "LLM response parse failed",

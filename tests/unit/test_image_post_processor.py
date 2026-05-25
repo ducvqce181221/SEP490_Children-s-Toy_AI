@@ -78,7 +78,7 @@ def test_ocr_bank_rejected():
     assert "Chứa dãy số nghi là số tài khoản ngân hàng" in result.reason
 
 
-def test_no_toy_label_manual_review():
+def test_no_toy_label_rejected():
     pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
     vis_res = VisionAnalysisResult(
         safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
@@ -89,7 +89,7 @@ def test_no_toy_label_manual_review():
         detected_text="Clean text",
     )
     result = apply_vision_results(pre_res, vis_res)
-    assert result.decision == ModerationDecision.MANUAL_REVIEW
+    assert result.decision == ModerationDecision.REJECTED
     assert "no_toy_label" in result.flags
 
 
@@ -107,3 +107,19 @@ def test_valid_image_approved():
     assert result.decision == ModerationDecision.APPROVED
     assert not result.flags
     assert "toy" in result.reason
+
+
+def test_ocr_profanity_rejected():
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    vis_res = VisionAnalysisResult(
+        safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
+        labels=[{"description": "toy", "score": 0.9}],
+        hard_violation=False,
+        violation_reason=None,
+        toy_label_found=True,
+        detected_text="Đây là con cặc đồ chơi dmm",
+    )
+    result = apply_vision_results(pre_res, vis_res)
+    assert result.decision == ModerationDecision.REJECTED
+    assert "vision_profanity_violation" in result.flags
+    assert "từ ngữ thô tục" in result.reason

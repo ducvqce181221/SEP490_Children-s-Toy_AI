@@ -86,19 +86,11 @@ def run_image_prefilter(
     diagnostics["lv_normalized"] = round(lv_normalized, 4)
 
     reject_thresh = settings.image_blur_lv_reject_threshold
-    manual_thresh = settings.image_blur_lv_manual_review_threshold
 
     if lv_normalized < reject_thresh:
         return PrefilterImageResult(
             decision=ModerationDecision.REJECTED, flags=["blurry_image"],
             reason=f"Ảnh mờ/nhòe (LV_normalized={lv_normalized:.3f} < {reject_thresh})",
-            phash=phash, diagnostics=diagnostics,
-        )
-
-    if lv_normalized < manual_thresh:
-        return PrefilterImageResult(
-            decision=ModerationDecision.MANUAL_REVIEW, flags=["possibly_blurry"],
-            reason=f"Ảnh nghi mờ (LV_normalized={lv_normalized:.3f}, ngưỡng manual={manual_thresh})",
             phash=phash, diagnostics=diagnostics,
         )
 

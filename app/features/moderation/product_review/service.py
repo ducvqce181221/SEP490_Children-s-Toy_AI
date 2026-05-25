@@ -179,6 +179,21 @@ class ModerationOrchestrator:
                 review_id=review.review_id,
                 reason=manual_reason,
             )
+        elif final_decision == ModerationDecision.REJECTED:
+            reject_reason = "Vi phạm quy chuẩn nội dung"
+            if text_result.decision == ModerationDecision.REJECTED:
+                reject_reason = text_result.reason
+            else:
+                for _, img_res in image_results:
+                    if img_res.decision == ModerationDecision.REJECTED:
+                        reject_reason = img_res.reason
+                        break
+
+            await self._notif.send_customer_rejection_notification(
+                review_id=review.review_id,
+                customer_id=review.account_id,
+                reason=reject_reason,
+            )
 
         logger.info("Moderation complete", review_id=review.review_id, final_decision=final_decision)
 
@@ -266,9 +281,13 @@ class ModerationOrchestrator:
             )
 
     async def _send_manual_review_notification(self, review_id: int, reason: str) -> None:
+        reviewer_name = await self._repo.get_reviewer_name_by_review_id(review_id)
         accounts = await self._repo.fetch_admin_staff_accounts()
         await self._notif.send_manual_review_alert(
-            review_id=review_id, reason=reason, admin_staff_accounts=accounts,
+            review_id=review_id,
+            reviewer_name=reviewer_name,
+            reason=reason,
+            admin_staff_accounts=accounts,
         )
 
 

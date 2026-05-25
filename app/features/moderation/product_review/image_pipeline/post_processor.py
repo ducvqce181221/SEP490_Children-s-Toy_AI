@@ -11,6 +11,7 @@ from app.features.moderation.product_review.image_pipeline.vision_client import 
 from app.features.moderation.product_review.image_pipeline.prefilter import PrefilterImageResult
 from app.features.moderation.schemas import ImagePipelineResult, ModerationDecision
 from app.features.moderation.product_review.text_pipeline.prefilter import find_sensitive_patterns
+from app.utils.text_utils import has_hard_profanity
 
 logger = get_logger(__name__)
 
@@ -32,6 +33,16 @@ def apply_vision_results(
         )
 
     if vision_result.detected_text:
+        if has_hard_profanity(vision_result.detected_text):
+            return ImagePipelineResult(
+                decision=ModerationDecision.REJECTED,
+                flags=["vision_profanity_violation"],
+                reason="Ảnh chứa từ ngữ thô tục cực đoan (chặn tự động từ OCR)",
+                decided_by="vision_ocr_profanity",
+                phash=phash,
+                raw_vision_result=vision_result.raw_response,
+            )
+
         text_violation_reason = find_sensitive_patterns(vision_result.detected_text)
         if text_violation_reason:
             return ImagePipelineResult(
@@ -49,7 +60,7 @@ def apply_vision_results(
             for lbl in vision_result.labels[:5]
         ]
         return ImagePipelineResult(
-            decision=ModerationDecision.MANUAL_REVIEW,
+            decision=ModerationDecision.REJECTED,
             flags=["no_toy_label"],
             reason=f"Không tìm thấy nhãn đồ chơi phù hợp. Labels: {', '.join(top_labels)}",
             decided_by="vision_labels",
