@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -18,3 +18,14 @@ class BlogContentGenerateRequest(BaseModel):
 class BlogContentGenerateResponse(BaseModel):
     title: str
     content: str
+
+
+class BlogContentBlockedResponse(BaseModel):
+    status: Literal["blocked"] = "blocked"
+    violation_type: Literal["brand_external", "topic_restricted", "out_of_scope"]
+    violated_keyword: str
+    reason: str
+    suggestions: list[str]
+
+
+BlogContentGenerateEndpointResponse = Union[BlogContentGenerateResponse, BlogContentBlockedResponse]
