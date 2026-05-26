@@ -1,0 +1,96 @@
+"""
+tests/unit/test_text_prefilter.py
+----------------------------------
+Unit tests for text_pipeline/prefilter.py (no external deps, pure logic).
+"""
+
+from __future__ import annotations
+
+import pytest
+from app.features.moderation.product_review.text_pipeline.prefilter import run_prefilter
+
+
+class TestRunPrefilter:
+
+    def test_clean_comment_passes(self):
+        result = run_prefilter("Sản phẩm rất tốt, con tôi rất thích!")
+        assert not result.rejected
+
+    def test_mild_comment_passes(self):
+        result = run_prefilter("Chất lượng ổn, giao hàng nhanh.")
+        assert not result.rejected
+
+    def test_exactly_five_meaningful_chars(self):
+        result = run_prefilter("abcde")
+        assert not result.rejected
+
+    def test_empty_string_rejected(self):
+        result = run_prefilter("")
+        assert result.rejected
+
+    def test_whitespace_only_rejected(self):
+        result = run_prefilter("   ")
+        assert result.rejected
+
+    def test_less_than_5_meaningful_chars(self):
+        result = run_prefilter("ab!!")
+        assert result.rejected
+        assert "ký tự có nghĩa" in result.reason
+
+    def test_spam_repetition_rejected(self):
+        result = run_prefilter("aaaaaaaaaaaaaaaaaaa")
+        assert result.rejected
+        assert "lặp" in result.reason
+
+    def test_exactly_70_percent_not_rejected(self):
+        result = run_prefilter("aaaaaaabcd")
+        assert not result.rejected
+
+    def test_short_spam_not_rejected(self):
+        result = run_prefilter("aaaaaaaaa!")
+        assert not result.rejected
+
+    def test_https_url_rejected(self):
+        result = run_prefilter("Xem thêm tại https://example.com sản phẩm tốt")
+        assert result.rejected
+        assert "URL" in result.reason
+
+    def test_www_url_rejected(self):
+        result = run_prefilter("Vào www.spam.com mua giá rẻ hơn")
+        assert result.rejected
+
+    def test_bitly_rejected(self):
+        result = run_prefilter("Click bit.ly/abcdef để xem")
+        assert result.rejected
+
+    def test_tinyurl_rejected(self):
+        result = run_prefilter("Xem tinyurl.com/xyz nhé")
+        assert result.rejected
+
+    def test_vn_phone_10_digits_rejected(self):
+        result = run_prefilter("Liên hệ 0912345678 để mua buôn")
+        assert result.rejected
+        assert "điện thoại" in result.reason
+
+    def test_vn_phone_plus84_rejected(self):
+        result = run_prefilter("Gọi +84912345678 nhé")
+        assert result.rejected
+
+    def test_bank_account_9_digits_rejected(self):
+        result = run_prefilter("Chuyển tiền vào tài khoản 123456789 nhé")
+        assert result.rejected
+        assert "tài khoản" in result.reason
+
+    def test_bank_account_14_digits_rejected(self):
+        result = run_prefilter("Số TK: 12345678901234")
+        assert result.rejected
+
+    def test_normal_number_not_rejected(self):
+        result = run_prefilter("Mã đơn hàng là 12345678 đang giao")
+        assert not result.rejected
+
+    def test_hard_profanity_rejected(self):
+        result = run_prefilter("Đồ chơi như con cặc")
+        assert result.rejected
+        assert "thô tục" in result.reason
+
