@@ -50,6 +50,7 @@ def apply_business_rules(
     """
     settings = get_settings()
     overrides: list[str] = []
+    override_descriptions: list[str] = []
     new_decision = result.decision
 
     # Rule 1: Low confidence → escalate APPROVED/ambiguous to MANUAL_REVIEW
@@ -60,6 +61,7 @@ def apply_business_rules(
             overrides.append(
                 f"low_confidence:{result.confidence:.2f}<{settings.llm_confidence_threshold}"
             )
+            override_descriptions.append("Độ tin cậy của AI thấp")
 
     # Rule 2: health_concern flag → escalate APPROVED to MANUAL_REVIEW (child safety)
     # (do NOT downgrade REJECTED — a rejected review with health concern stays rejected)
@@ -67,6 +69,7 @@ def apply_business_rules(
         if new_decision == ModerationDecision.APPROVED:
             new_decision = ModerationDecision.MANUAL_REVIEW
             overrides.append("health_concern_flag")
+            override_descriptions.append("Nghi vấn lo ngại về sức khỏe/an toàn trẻ em")
 
     # Rule 3: Repeat offender → downgrade APPROVED to MANUAL_REVIEW
     if (
@@ -76,6 +79,9 @@ def apply_business_rules(
         new_decision = ModerationDecision.MANUAL_REVIEW
         overrides.append(
             f"repeat_offender:{context.recent_rejected_count}_rejected_in_{settings.account_rejected_review_days}d"
+        )
+        override_descriptions.append(
+            f"Tài khoản có {context.recent_rejected_count} đánh giá bị từ chối gần đây"
         )
 
     # Rule 4: New product (created < N days ago) → downgrade APPROVED to MANUAL_REVIEW
@@ -87,14 +93,15 @@ def apply_business_rules(
     ):
         new_decision = ModerationDecision.MANUAL_REVIEW
         overrides.append(f"new_product:{product_age_days}d_old")
+        override_descriptions.append("Sản phẩm mới đăng bán cần duyệt kỹ")
 
     if not overrides:
         return result
 
     # Build updated result with override flags
     updated_flags = result.flags + [f"override:{o}" for o in overrides]
-    override_summary = "; ".join(overrides)
-    reason = f"{result.reason} [Override: {override_summary}]" if result.reason else f"Override: {override_summary}"
+    override_reason = "; ".join(override_descriptions)
+    reason = f"Nội dung không vi phạm trực tiếp nhưng cần duyệt thủ công: {override_reason}"
 
     logger.info(
         "Post-processor overrode LLM decision",

@@ -73,15 +73,25 @@ class TestApplyBusinessRules:
         assert out.decision == ModerationDecision.REJECTED
 
     def test_repeat_offender_escalates_approved(self):
+        from app.core.config import get_settings
+        settings = get_settings()
         result = _make_result(confidence=0.90)
-        ctx = PostProcessContext(recent_rejected_count=2, product_created_at=_old_product())
+        ctx = PostProcessContext(
+            recent_rejected_count=settings.account_rejected_review_max, 
+            product_created_at=_old_product()
+        )
         out = apply_business_rules(result, ctx)
         assert out.decision == ModerationDecision.MANUAL_REVIEW
         assert any("repeat_offender" in f for f in out.flags)
 
     def test_one_rejection_not_escalated(self):
+        from app.core.config import get_settings
+        settings = get_settings()
         result = _make_result(confidence=0.90)
-        ctx = PostProcessContext(recent_rejected_count=1, product_created_at=_old_product())
+        ctx = PostProcessContext(
+            recent_rejected_count=settings.account_rejected_review_max - 1, 
+            product_created_at=_old_product()
+        )
         out = apply_business_rules(result, ctx)
         assert out.decision == ModerationDecision.APPROVED
 

@@ -114,7 +114,6 @@ class Settings(BaseSettings):
     image_min_size_kb: int = Field(default=10, gt=0)
     image_max_size_mb: int = Field(default=10, gt=0)
     image_blur_lv_reject_threshold: float = Field(default=1.0, gt=0)
-    image_blur_lv_manual_review_threshold: float = Field(default=2.5, gt=0)
     image_phash_hamming_distance: int = Field(default=10, ge=0)
     image_phash_duplicate_min_reviews: int = Field(default=5, ge=1)
 
@@ -123,16 +122,6 @@ class Settings(BaseSettings):
     account_rejected_review_max: int = Field(default=2, ge=1)
     new_product_days: int = Field(default=7, gt=0)
     llm_confidence_threshold: float = Field(default=0.70, ge=0.0, le=1.0)
-
-    @field_validator("image_blur_lv_manual_review_threshold")
-    @classmethod
-    def manual_threshold_must_exceed_reject(cls, v: float, info) -> float:  # noqa: ANN001
-        reject = info.data.get("image_blur_lv_reject_threshold", 1.0)
-        if v <= reject:
-            raise ValueError(
-                "image_blur_lv_manual_review_threshold must be > image_blur_lv_reject_threshold"
-            )
-        return v
 
     def resolve_google_credentials(self) -> str | None:
         if self.google_application_credentials_json:
