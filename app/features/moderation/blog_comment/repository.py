@@ -513,19 +513,19 @@ class BlogCommentModerationRepository:
                 row = await cur.fetchone()
         return int(row[0] if row else 0)
 
-    async def lock_comment_privilege(self, account_id: int, *, lock_days: int) -> None:
+    async def lock_comment_privilege(self, account_id: int) -> None:
         await self.get_or_create_violation_count(account_id)
         sql = """
             UPDATE [dbo].[BlogCommentViolationCount]
             SET [IsCommentBanned] = 1,
                 [BannedAt] = GETUTCDATE(),
-                [BanExpiresAt] = DATEADD(DAY, ?, GETUTCDATE()),
+                [BanExpiresAt] = NULL,
                 [UpdatedAt] = GETUTCDATE()
             WHERE [AccountID] = ?
         """
         async with get_connection() as conn:
             async with get_cursor(conn) as cur:
-                await cur.execute(sql, lock_days, account_id)
+                await cur.execute(sql, account_id)
 
     async def get_expired_manual_review_comments(self) -> list[BlogCommentRecord]:
         sql = """
@@ -599,6 +599,9 @@ class BlogCommentModerationRepository:
         sql = """
             UPDATE [dbo].[BlogCommentViolationCount]
             SET [IsCommentBanned] = 0,
+                [BanExpiresAt] = NULL,
+                [ViolationCount] = 0,
+                [LastViolatedAt] = NULL,
                 [UnbannedAt] = GETUTCDATE(),
                 [UpdatedAt] = GETUTCDATE()
             WHERE [AccountID] = ?

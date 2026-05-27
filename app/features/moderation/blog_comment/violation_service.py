@@ -15,9 +15,6 @@ class BlogCommentViolationService:
         count = await self._repo.increment_violation(account_id)
         if count < self._settings.blog_comment_violation_threshold:
             return
-        await self._repo.lock_comment_privilege(
-            account_id,
-            lock_days=self._settings.blog_comment_lock_days,
-        )
+        await self._repo.lock_comment_privilege(account_id)
         await self._notif.notify_account_locked(account_id)
 

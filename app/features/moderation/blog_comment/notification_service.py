@@ -34,7 +34,7 @@ class BlogCommentNotificationService:
         await self._repo.insert_user_notification(
             account_id=account_id,
             title="Commenting locked",
-            message="Your commenting access has been locked for 7 days due to repeated violations.",
+            message="Your commenting access has been locked due to repeated violations.",
             idempotency_key=f"blog-comment:lock:{account_id}",
         )
 
