@@ -10,6 +10,9 @@ _RAW_HARD_PROFANITY_WORDS = (
     "đéo",
     "buồi",
     "chó đẻ",
+    "khốn nạn",
+    "mất dạy",
+    "rác rưởi",
 )
 
 _HARD_PROFANITY_PATTERNS = (
@@ -24,8 +27,8 @@ _HARD_PROFANITY_PATTERNS = (
     r"\bcka\b",
     r"\bkak\b",
     
-    # lồn / loz / l0n / lozl
-    r"\blo[ln]\b",
+    # lồn / loz / l0n / lozl (lol is removed to let LLM evaluate it contextually)
+    r"\blon\b",
     r"\bloz\b",
     r"\blozl\b",
     r"\bl0n\b",
@@ -39,35 +42,25 @@ _HARD_PROFANITY_PATTERNS = (
     r"\bdeo\b",
     r"\bde0\b",
     
-    # chó / cko / cko's
+    # chó / cko variations (unambiguous insults)
     r"\bcon\s*cko\b",
     r"\bcon\s*cho\b",
-    r"\bcko\b",
     r"\bcho\s*de\b",
-    r"\bcho\s*ma\b",
-    r"\bcho\s*dua\b",
-    r"\bcho\s*ho\b",
-    r"\bcho\s*san\b",
     
-    # đm / dmm / clm / clmm / vcl
+    # đm / dmm / clm / clmm (vcl/vl/cl/sml removed to let LLM evaluate contextually)
     r"\bdm\b",
     r"\bdmm\b",
     r"\bclm\b",
     r"\bclmm\b",
-    r"\bvcl\b",
-    r"\bcl\b",
-    r"\bsml\b",
-    r"\bsm[ln]\b",
-    r"\bvl\b",
-    
-    # Other common vulgar phrases
-    r"\bb[uO]di\b",
-    r"\bbuoi\b",
-    r"\bbua\b",
-    r"\bvai\b",
 )
 
 _HARD_PROFANITY_REGEX = [re.compile(p, re.IGNORECASE) for p in _HARD_PROFANITY_PATTERNS]
+
+_COMPACT_HARD_PROFANITY_KEYWORDS = (
+    "concac", "conkac", "concak", "concax", "conlon", "condit", "condjt",
+    "ditconme", "djtconme", "djtme", "ditme", "chode",
+    "khonnan", "matday", "racruoi",
+)
 
 
 def normalize_vietnamese_text(text: str | None) -> str:
@@ -87,7 +80,10 @@ def normalize_vietnamese_text(text: str | None) -> str:
 def has_hard_profanity(text: str | None) -> bool:
     """
     Quick local check to detect if text contains extremely vulgar Vietnamese swear words.
-    Uses raw check for accented words first, and normalized text for teen-code.
+    Uses:
+      1. Raw check for accented vulgar words (before diacritics removal).
+      2. Normalized regex search for unaccented severe words.
+      3. Compact (spacing-stripped) keyword check to counter formatting bypasses.
     """
     if not text:
         return False
@@ -99,5 +95,12 @@ def has_hard_profanity(text: str | None) -> bool:
         
     # 2. Check unaccented / teen code variations after normalization
     normalized = normalize_vietnamese_text(text)
-    return any(pattern.search(normalized) for pattern in _HARD_PROFANITY_REGEX)
-
+    if any(pattern.search(normalized) for pattern in _HARD_PROFANITY_REGEX):
+        return True
+        
+    # 3. Compact space/punctuation-stripped bypass counter check
+    compact = "".join(ch for ch in normalized if ch.isalnum())
+    if any(kw in compact for kw in _COMPACT_HARD_PROFANITY_KEYWORDS):
+        return True
+        
+    return False
