@@ -237,10 +237,11 @@ class ModerationOrchestrator:
         
         # Only log the LLM model version if it was processed by LLM (not local prefilter)
         text_model = self._settings.groq_model if (text_result.decided_by and text_result.decided_by.startswith("llm")) else None
+        text_reason = None if text_result.decision == ModerationDecision.APPROVED else text_result.reason
         await self._repo.insert_moderation_log(
             review_id=review.review_id, image_id=None, target_type="Text",
             action=_decision_to_action(text_result.decision),
-            reason=text_result.reason, moderation_result=text_result.raw_llm_result,
+            reason=text_reason, moderation_result=text_result.raw_llm_result,
             ai_model_version=text_model,
         )
         for image_id, img_result in image_results:
@@ -249,10 +250,11 @@ class ModerationOrchestrator:
             
             # Only log the vision model version if it was processed by Google Vision (not local prefilter)
             img_model = "google-vision-v1" if (img_result.decided_by and img_result.decided_by.startswith("vision")) else None
+            img_reason = None if img_result.decision == ModerationDecision.APPROVED else img_result.reason
             await self._repo.insert_moderation_log(
                 review_id=review.review_id, image_id=image_id, target_type="Image",
                 action=_decision_to_action(img_result.decision),
-                reason=img_result.reason, moderation_result=img_result.raw_vision_result,
+                reason=img_reason, moderation_result=img_result.raw_vision_result,
                 ai_model_version=img_model,
             )
 

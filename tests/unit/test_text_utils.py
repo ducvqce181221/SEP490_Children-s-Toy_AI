@@ -13,21 +13,31 @@ def test_normalize_vietnamese_text():
 
 
 def test_has_hard_profanity():
-    # Direct bad words (casing and accents should be normalized)
+    # Direct severe bad words
     assert has_hard_profanity("con cac")
     assert has_hard_profanity("con cặc")
     assert has_hard_profanity("địt con mẹ")
     assert has_hard_profanity("dmm")
-    assert has_hard_profanity("cl")
-    assert has_hard_profanity("lol")
-    assert has_hard_profanity("vãi")
     assert has_hard_profanity("chó đẻ")
+    assert has_hard_profanity("thằng khốn nạn")
+    assert has_hard_profanity("mất dạy")
+
+    # Spacing and newline bypass counters
+    assert has_hard_profanity("thằng\nkhốn\nnạn")
+    assert has_hard_profanity("t h ắ n g  k h ố n  n ạ n")
+    assert has_hard_profanity("c-o-n c-ạ-c")
     
     # Teen code and vulgar slangs
     assert has_hard_profanity("Sãn phẩm như con kặc cà cko's")
     assert has_hard_profanity("con cko's")
     assert has_hard_profanity("kac")
-    assert has_hard_profanity("cko")
+
+    # Mild slang / ambiguous words are NOT strictly blocked by pre-filter (processed by LLM instead)
+    assert not has_hard_profanity("cl")
+    assert not has_hard_profanity("lol")
+    assert not has_hard_profanity("vãi")
+    assert not has_hard_profanity("đỉnh vcl")
+    assert not has_hard_profanity("buổi sáng")
 
     # Clean words should not match
     assert not has_hard_profanity("Sản phẩm tốt")
