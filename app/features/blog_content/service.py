@@ -10,6 +10,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.utils.text_utils import has_hard_profanity
 
 MAX_CONTENT_LENGTH = 10_000
 MIN_CONTENT_LENGTH = 3_000
@@ -38,6 +39,39 @@ DEFAULT_BLOCK_SUGGESTIONS = [
     "Hướng dẫn chọn quà sinh nhật cho trẻ",
     "Top đồ chơi sáng tạo được yêu thích nhất",
     "Kinh nghiệm mua đồ chơi online an toàn cho phụ huynh",
+]
+
+_LEETSPEAK_MAP = str.maketrans({
+    "@": "a",
+    "$": "s",
+    "0": "o",
+    "1": "i",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+    "|": "i",
+    "!": "i",
+})
+
+_UNSAFE_CONTENT_PATTERNS = [
+    re.compile(r"f+u+c+k+", re.IGNORECASE),
+    re.compile(r"s+h+i+t+", re.IGNORECASE),
+    re.compile(r"b+i+t+c+h+", re.IGNORECASE),
+    re.compile(r"a+s+s+h+o+l+e+", re.IGNORECASE),
+    re.compile(r"b+a+s+t+a+r+d+", re.IGNORECASE),
+    re.compile(r"d+i+c+k+", re.IGNORECASE),
+    re.compile(r"p+u+s+s+y+", re.IGNORECASE),
+    re.compile(r"killyourself", re.IGNORECASE),
+    re.compile(r"godie", re.IGNORECASE),
+    re.compile(r"ditme", re.IGNORECASE),
+    re.compile(r"duma", re.IGNORECASE),
+    re.compile(r"dume", re.IGNORECASE),
+    re.compile(r"concac", re.IGNORECASE),
+    re.compile(r"cac", re.IGNORECASE),
+    re.compile(r"lon", re.IGNORECASE),
+    re.compile(r"condi", re.IGNORECASE),
+    re.compile(r"conme", re.IGNORECASE),
 ]
 
 
@@ -75,10 +109,21 @@ def _normalize_for_check(value: str) -> str:
 
 
 def pre_check(topic: str) -> dict[str, str | list[str]] | None:
-    normalized = f" {_normalize_for_check(topic)} "
+    normalized_core = _normalize_for_check(topic)
+    normalized = f" {normalized_core} "
     for w in WHITELIST:
         normalized = normalized.replace(f" {_normalize_for_check(w)} ", " ")
     normalized = re.sub(r"\s+", " ", normalized).strip()
+
+    unsafe_match = _detect_unsafe_content(topic)
+    if unsafe_match:
+        return {
+            "status": "blocked",
+            "violation_type": "unsafe_content",
+            "violated_keyword": unsafe_match,
+            "reason": "Nội dung chứa từ ngữ tục tĩu, xúc phạm hoặc toxic, không phù hợp với môi trường trẻ em.",
+            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+        }
 
     for violation_type, keywords in BLOCKED_KEYWORDS.items():
         for kw in keywords:
@@ -91,6 +136,30 @@ def pre_check(topic: str) -> dict[str, str | list[str]] | None:
                     "reason": f"Chủ đề đề cập đến '{kw}' không thuộc phạm vi Children's Toy Store.",
                     "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
                 }
+    return None
+
+
+def _detect_unsafe_content(text: str) -> str | None:
+    if has_hard_profanity(text):
+        return "hard_profanity"
+
+    normalized = _normalize_for_check(text)
+    tokenized = f" {normalized} "
+    for short_token in (
+        " dm ", " dmm ", " dcm ", " vcl ", " clm ", " clmm ", " dit ", " deo ",
+        " duma ", " dume ", " cac ", " lon ",
+    ):
+        if short_token in tokenized:
+            return short_token.strip()
+
+    compact = re.sub(r"[^a-z0-9]", "", normalized.translate(_LEETSPEAK_MAP))
+    if not compact:
+        return None
+
+    for pattern in _UNSAFE_CONTENT_PATTERNS:
+        match = pattern.search(compact)
+        if match:
+            return match.group(0)
     return None
 
 
