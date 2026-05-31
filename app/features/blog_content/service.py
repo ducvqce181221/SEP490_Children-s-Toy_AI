@@ -4,6 +4,7 @@ import json
 import re
 import hashlib
 import unicodedata
+import time
 from pathlib import Path
 
 import httpx
@@ -15,6 +16,10 @@ from app.utils.text_utils import has_hard_profanity
 MAX_CONTENT_LENGTH = 10_000
 MIN_CONTENT_LENGTH = 3_000
 _PRECONTENT_CACHE: str | None = None
+_PRECONTENT_LOADED_PATH: str | None = None
+_GENERATE_CACHE_TTL_SECONDS = 300.0
+_GENERATE_CACHE_MAX_ITEMS = 128
+_GENERATE_RESULT_CACHE: dict[str, tuple[float, tuple[str, str]]] = {}
 logger = get_logger(__name__)
 
 
@@ -74,6 +79,22 @@ _UNSAFE_CONTENT_PATTERNS = [
     re.compile(r"conme", re.IGNORECASE),
 ]
 
+_SHORT_UNSAFE_TOKENS = (
+    " dm ", " dmm ", " dcm ", " vcl ", " clm ", " clmm ", " dit ", " deo ", " duma ", " dume ",
+)
+
+_INTENT_ANCHORS = [
+    "đồ chơi", "do choi", "toy", "toys", "children toy", "kids toy",
+    "bé", "tre em", "trẻ em", "phụ huynh", "phu huynh",
+    "parenting", "child development", "giáo dục trẻ em", "giao duc tre em",
+    "learning through play", "stem toy", "toy safety",
+]
+
+_OFF_TOPIC_HINTS = [
+    "chinh tri", "chính trị", "politics", "election", "review phim", "movie review",
+    "nấu ăn", "nau an", "recipe", "crypto", "chung khoan", "stock market",
+]
+
 
 def _build_contextual_fallback_suggestions(title: str, content: str) -> list[str]:
     combined = _normalize_for_check(f"{title} {content}")
@@ -99,20 +120,86 @@ def _build_contextual_fallback_suggestions(title: str, content: str) -> list[str
     ]
 
 
-def _normalize_for_check(value: str) -> str:
+def _has_vietnamese_diacritic(value: str) -> bool:
+    return bool(re.search(r"[ăâđêôơưáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]", (value or "").lower()))
+
+
+def _normalize_for_check(value: str, *, strip_diacritic: bool = True) -> str:
     lowered = (value or "").lower()
-    no_diacritic = "".join(
-        ch for ch in unicodedata.normalize("NFKD", lowered) if not unicodedata.combining(ch)
-    )
-    alpha_num_space = re.sub(r"[^a-z0-9\s]", " ", no_diacritic)
+    if strip_diacritic:
+        normalized = "".join(
+            ch for ch in unicodedata.normalize("NFKD", lowered) if not unicodedata.combining(ch)
+        )
+        alpha_num_space = re.sub(r"[^a-z0-9\s]", " ", normalized)
+    else:
+        alpha_num_space = re.sub(r"[^\w\s]", " ", lowered, flags=re.UNICODE)
     return re.sub(r"\s+", " ", alpha_num_space).strip()
 
 
+def _build_deepseek_endpoints(base_url: str) -> list[str]:
+    base = (base_url or "https://api.deepseek.com").rstrip("/")
+    if base.endswith("/chat/completions"):
+        return [base]
+    if base.endswith("/v1"):
+        return [f"{base}/chat/completions"]
+    return [f"{base}/chat/completions", f"{base}/v1/chat/completions"]
+
+
+def _make_generate_cache_key(
+    action: str,
+    title: str,
+    description: str | None,
+    prompt_structure: str,
+    tone: str,
+    category_id: int,
+    source_content: str | None,
+) -> str:
+    raw = "|".join([
+        action or "",
+        title or "",
+        description or "",
+        prompt_structure or "",
+        tone or "",
+        str(category_id),
+        source_content or "",
+    ])
+    return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _cache_get(key: str) -> tuple[str, str] | None:
+    now = time.monotonic()
+    cached = _GENERATE_RESULT_CACHE.get(key)
+    if not cached:
+        return None
+    ts, value = cached
+    if now - ts > _GENERATE_CACHE_TTL_SECONDS:
+        _GENERATE_RESULT_CACHE.pop(key, None)
+        return None
+    return value
+
+
+def _cache_put(key: str, value: tuple[str, str]) -> None:
+    now = time.monotonic()
+    if len(_GENERATE_RESULT_CACHE) >= _GENERATE_CACHE_MAX_ITEMS:
+        oldest_key = min(_GENERATE_RESULT_CACHE.items(), key=lambda item: item[1][0])[0]
+        _GENERATE_RESULT_CACHE.pop(oldest_key, None)
+    _GENERATE_RESULT_CACHE[key] = (now, value)
+
+
+def _contains_keyword(normalized_text: str, keyword: str) -> bool:
+    normalized_kw = _normalize_for_check(keyword, strip_diacritic=True)
+    if not normalized_kw:
+        return False
+    if len(normalized_kw) < 5:
+        return re.search(rf"\b{re.escape(normalized_kw)}\b", normalized_text, flags=re.IGNORECASE) is not None
+    return f" {normalized_kw} " in f" {normalized_text} "
+
+
 def pre_check(topic: str) -> dict[str, str | list[str]] | None:
-    normalized_core = _normalize_for_check(topic)
+    normalized_core = _normalize_for_check(topic, strip_diacritic=True)
     normalized = f" {normalized_core} "
     for w in WHITELIST:
-        normalized = normalized.replace(f" {_normalize_for_check(w)} ", " ")
+        normalized = normalized.replace(f" {_normalize_for_check(w, strip_diacritic=True)} ", " ")
     normalized = re.sub(r"\s+", " ", normalized).strip()
 
     unsafe_match = _detect_unsafe_content(topic)
@@ -127,8 +214,7 @@ def pre_check(topic: str) -> dict[str, str | list[str]] | None:
 
     for violation_type, keywords in BLOCKED_KEYWORDS.items():
         for kw in keywords:
-            normalized_kw = _normalize_for_check(kw)
-            if f" {normalized_kw} " in f" {normalized} ":
+            if _contains_keyword(normalized, kw):
                 return {
                     "status": "blocked",
                     "violation_type": violation_type,
@@ -143,23 +229,63 @@ def _detect_unsafe_content(text: str) -> str | None:
     if has_hard_profanity(text):
         return "hard_profanity"
 
-    normalized = _normalize_for_check(text)
+    is_vietnamese = _has_vietnamese_diacritic(text)
+    normalized = _normalize_for_check(text, strip_diacritic=not is_vietnamese)
     tokenized = f" {normalized} "
-    for short_token in (
-        " dm ", " dmm ", " dcm ", " vcl ", " clm ", " clmm ", " dit ", " deo ",
-        " duma ", " dume ", " cac ", " lon ",
-    ):
+    for short_token in _SHORT_UNSAFE_TOKENS:
         if short_token in tokenized:
             return short_token.strip()
 
-    compact = re.sub(r"[^a-z0-9]", "", normalized.translate(_LEETSPEAK_MAP))
+    compact_source = normalized if is_vietnamese else normalized.translate(_LEETSPEAK_MAP)
+    compact = re.sub(r"[^a-z0-9]", "", compact_source)
     if not compact:
         return None
 
     for pattern in _UNSAFE_CONTENT_PATTERNS:
-        match = pattern.search(compact)
+        pattern_text = pattern.pattern
+        if len(pattern_text) < 5:
+            match = re.search(rf"\b{re.escape(pattern_text)}\b", compact, flags=re.IGNORECASE)
+        else:
+            match = pattern.search(compact)
         if match:
             return match.group(0)
+    return None
+
+
+def classify_intent(title: str, description: str | None, prompt_structure: str) -> dict[str, str | bool]:
+    combined = f"{title} {description or ''} {prompt_structure}"
+    normalized = _normalize_for_check(combined, strip_diacritic=True)
+    if not normalized:
+        return {
+            "is_relevant": False,
+            "reason": "Nội dung chưa đủ thông tin để xác định chủ đề phù hợp.",
+            "suggestion": "Hãy thêm ngữ cảnh về đồ chơi, phụ huynh hoặc phát triển trẻ em.",
+        }
+
+    anchor_hits = sum(1 for anchor in _INTENT_ANCHORS if anchor in normalized)
+    off_topic_hits = sum(1 for hint in _OFF_TOPIC_HINTS if hint in normalized)
+    token_count = max(1, len(normalized.split()))
+    relevance_score = min(1.0, (anchor_hits * 1.2) / token_count)
+
+    if anchor_hits == 0 and (off_topic_hits > 0 or relevance_score < 0.35):
+        return {
+            "is_relevant": False,
+            "reason": "Chủ đề không liên quan đến đồ chơi trẻ em, phụ huynh hoặc giáo dục trẻ.",
+            "suggestion": "Hãy chuyển prompt sang chủ đề toy store, ví dụ chọn đồ chơi theo độ tuổi hoặc toy safety.",
+        }
+
+    return {"is_relevant": True, "reason": "", "suggestion": ""}
+
+
+def _build_source_content_warning(source_content: str | None) -> str | None:
+    if not source_content:
+        return None
+    source_violation = _detect_unsafe_content(source_content)
+    if source_violation:
+        return (
+            "Nguồn nội dung cũ có dấu hiệu từ ngữ nhạy cảm, hệ thống tiếp tục generate cho Improve mode "
+            f"và bỏ qua block từ sourceContent (matched: {source_violation})."
+        )
     return None
 
 
@@ -197,8 +323,7 @@ Trả về JSON theo đúng format, không thêm text nào khác:
         return contextual_fallback[:4]
 
     model = settings.blog_deepseek_model or "deepseek-chat"
-    base_url = (settings.blog_deepseek_base_url or "https://api.deepseek.com").rstrip("/")
-    endpoints = [f"{base_url}/chat/completions", f"{base_url}/v1/chat/completions"]
+    endpoints = _build_deepseek_endpoints(settings.blog_deepseek_base_url)
     headers = {
         "Authorization": f"Bearer {settings.blog_deepseek_api_key}",
         "Content-Type": "application/json",
@@ -238,23 +363,37 @@ Trả về JSON theo đúng format, không thêm text nào khác:
 
 
 def _load_precontent_rules() -> str:
-    global _PRECONTENT_CACHE
+    global _PRECONTENT_CACHE, _PRECONTENT_LOADED_PATH
     if _PRECONTENT_CACHE is not None:
         return _PRECONTENT_CACHE
 
-    precontent_path = Path(__file__).resolve().parents[1] / "moderation" / "text_pipeline" / "precontent.txt"
-    if not precontent_path.exists():
-        _PRECONTENT_CACHE = ""
-        return _PRECONTENT_CACHE
+    base_dir = Path(__file__).resolve().parents[1]
+    candidate_paths = [
+        base_dir / "moderation" / "product_review" / "text_pipeline" / "precontent.txt",
+        base_dir / "moderation" / "text_pipeline" / "precontent.txt",
+    ]
+    precontent_path = next((path for path in candidate_paths if path.exists()), None)
+    if precontent_path is None:
+        logger.error("Precontent rules file not found", candidate_paths=[str(path) for path in candidate_paths])
+        raise RuntimeError("Moderation rules failed to load: precontent.txt was not found.")
 
+    _PRECONTENT_LOADED_PATH = str(precontent_path)
     raw = precontent_path.read_bytes()
     for encoding in ("utf-8", "utf-8-sig", "cp1258", "latin-1"):
         try:
             _PRECONTENT_CACHE = raw.decode(encoding).strip()
+            if not _PRECONTENT_CACHE:
+                logger.error("Precontent rules loaded empty", path=_PRECONTENT_LOADED_PATH, encoding=encoding)
+                raise RuntimeError("Moderation rules failed to load: precontent.txt is empty.")
+            logger.info("Loaded precontent rules", path=_PRECONTENT_LOADED_PATH, encoding=encoding, chars=len(_PRECONTENT_CACHE))
             return _PRECONTENT_CACHE
         except UnicodeDecodeError:
             continue
     _PRECONTENT_CACHE = raw.decode("utf-8", errors="ignore").strip()
+    if not _PRECONTENT_CACHE:
+        logger.error("Precontent rules loaded empty after fallback decode", path=_PRECONTENT_LOADED_PATH)
+        raise RuntimeError("Moderation rules failed to load: precontent decode returned empty content.")
+    logger.info("Loaded precontent rules", path=_PRECONTENT_LOADED_PATH, encoding="utf-8-fallback", chars=len(_PRECONTENT_CACHE))
     return _PRECONTENT_CACHE
 
 
@@ -706,9 +845,20 @@ async def generate_blog_content(
         category_id=category_id,
     )
 
-    moderation_input = "\n".join(
-        [title or "", description or "", prompt_structure or "", source_content or ""]
-    )
+    # Gate 1: intent classification on user input only. Fail fast before prompt/model.
+    intent = classify_intent(title=title, description=description, prompt_structure=prompt_structure)
+    if not bool(intent.get("is_relevant")):
+        logger.info("Blog generation blocked by intent gate", reason=intent.get("reason"))
+        return {
+            "status": "blocked",
+            "violation_type": "out_of_scope",
+            "violated_keyword": "off_topic",
+            "reason": str(intent.get("reason", "Chủ đề không thuộc phạm vi website.")),
+            "suggestions": [str(intent.get("suggestion", DEFAULT_BLOCK_SUGGESTIONS[0]))] + DEFAULT_BLOCK_SUGGESTIONS[:3],
+        }
+
+    # Gate 2: strict moderation only on admin-provided fields (not sourceContent).
+    moderation_input = "\n".join([title or "", description or "", prompt_structure or ""])
     violation = pre_check(moderation_input)
     if violation:
         smart_suggestions = await generate_smart_suggestions(
@@ -725,13 +875,31 @@ async def generate_blog_content(
         )
         return violation
 
+    # Gate 2b: sourceContent is system-injected in Improve mode; never hard-block from this scope.
+    source_warning = _build_source_content_warning(source_content)
+    if source_warning:
+        logger.warning("Source content moderation warning", detail=source_warning)
+
+    cache_key = _make_generate_cache_key(
+        action=action,
+        title=title,
+        description=description,
+        prompt_structure=prompt_structure,
+        tone=tone,
+        category_id=category_id,
+        source_content=source_content,
+    )
+    cached_result = _cache_get(cache_key)
+    if cached_result is not None:
+        logger.info("AI blog generation cache hit", title_len=len(title or ""))
+        return cached_result
+
     settings = get_settings()
     if not settings.blog_deepseek_api_key:
         raise BlogContentGenerationError("DEEPSEEK_API_KEY is not configured.")
 
     model = settings.blog_deepseek_model or "deepseek-chat"
-    base_url = (settings.blog_deepseek_base_url or "https://api.deepseek.com").rstrip("/")
-    endpoints = [f"{base_url}/chat/completions", f"{base_url}/v1/chat/completions"]
+    endpoints = _build_deepseek_endpoints(settings.blog_deepseek_base_url)
 
     strategy = _build_dynamic_writing_strategy(
         title=title,
@@ -741,15 +909,12 @@ async def generate_blog_content(
     )
 
     system_prompt = (
-        "You are an expert multilingual blog writer for a children's toy e-commerce website. "
-        "You must understand both Vietnamese and English input. "
-        "Output must always be in professional, natural, SEO-friendly English. "
-        "If input is Vietnamese, preserve the original meaning and generate an English article. "
-        "If input is English, generate English as usual. "
-        "Content must be safe, family-friendly, and relevant only to children's toys, parenting, and child development. "
-        "Avoid generic reusable templates and avoid repeating sentence patterns across requests. "
-        "Each article must be highly specific to the provided prompt intent. "
-        "Do not repeat input metadata or prompt fields."
+        "You are a senior blog writer for a children's toy e-commerce website. "
+        "Understand Vietnamese and English input, but always output natural SEO-friendly English. "
+        "Keep content family-safe and specific to toys, parenting, and child development. "
+        "Write strictly about the user-provided topic and intent. "
+        "Do not rewrite, redirect, or reinterpret off-topic requests into toy-store content. "
+        "Avoid template-like phrasing and do not echo request metadata."
     )
     precontent_rules = _load_precontent_rules()
     user_prompt = f"""
@@ -768,30 +933,15 @@ DynamicWritingStrategy:
 - CTA style: {strategy['cta_style']}
 - CTA message intent: {strategy['topic_cta']}
 
-Create a complete blog article with opening, body, and conclusion.
-Use natural language, practical guidance, and coherent flow.
-Length requirement: content must be between 3000 and 6000 characters.
-Structure requirement:
-- One opening section
-- At least 3 body sections with clear subheadings
-- One conclusion section
-IMPORTANT:
-- Do NOT output title or description inside content body.
-- Do NOT output labels/phrases like "Mo bai", "Than bai", "Ket bai" (or Vietnamese accented variants).
-- Write continuous natural blog sections only.
-- Multilingual behavior:
-  - Understand both Vietnamese and English input.
-  - Always produce title and content in English.
-  - If input is Vietnamese, translate and optimize title to professional SEO English while preserving original intent.
-  - If input is English, keep normal English generation.
-- Content uniqueness:
-  - Use a distinct opening approach for this request.
-  - Use unique section headings tied to this exact prompt topic.
-  - Avoid repeating fixed phrases such as "This article helps parents choose safe..." unless context explicitly requires it.
-  - Avoid reusing the same structure as previous requests; follow DynamicWritingStrategy.
-Return ONLY valid JSON (no markdown, no explanation) with keys: title, content.
-The content value must be HTML (<h1>, <h2>, <h3>, <p>, <ul>, <li>, <strong>, <blockquote>) and <= 10000 characters.
-Use rich formatting naturally: headings, bullet lists, highlighted key points, quote blocks, and readable spacing.
+Write one complete article with opening, body, and conclusion.
+Constraints:
+- 3000-6000 characters, continuous natural prose.
+- Opening + at least 3 body sections with unique subheadings + conclusion.
+- Do NOT include request metadata or labels like "Mo bai/Than bai/Ket bai".
+- Always return English title and content (translate intent if Vietnamese input).
+- Keep wording varied and specific to this prompt topic.
+- Return ONLY valid JSON: {{"title":"...","content":"..."}}.
+- content must be HTML and <=10000 chars using <h1>, <h2>, <h3>, <p>, <ul>, <li>, <strong>, <blockquote>.
 
 Precontent rules (must comply):
 {precontent_rules}
@@ -816,110 +966,112 @@ Precontent rules (must comply):
     per_request_timeout = settings.blog_deepseek_timeout_seconds
     retry_attempts = settings.blog_deepseek_retry_attempts
 
-    for endpoint in endpoints:
-        for attempt in range(retry_attempts):
-            payload = dict(payload_base)
-            if attempt > 0:
-                payload["messages"] = [
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": user_prompt
-                        + "\nIMPORTANT RETRY: Expand depth. Ensure 3000-6000 characters, opening-body-conclusion, and no metadata echo.",
-                    },
-                ]
+    async with httpx.AsyncClient(timeout=per_request_timeout) as client:
+        for endpoint in endpoints:
+            for attempt in range(retry_attempts):
+                payload = dict(payload_base)
+                if attempt > 0:
+                    payload["messages"] = [
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": user_prompt
+                            + "\nIMPORTANT RETRY: Expand depth. Ensure 3000-6000 characters, opening-body-conclusion, and no metadata echo.",
+                        },
+                    ]
 
-            try:
-                logger.info("Calling DeepSeek", endpoint=endpoint, attempt=attempt + 1)
-                async with httpx.AsyncClient(timeout=per_request_timeout) as client:
+                try:
+                    logger.info("Calling DeepSeek", endpoint=endpoint, attempt=attempt + 1)
                     resp = await client.post(endpoint, json=payload, headers=headers)
-            except httpx.TimeoutException:
-                last_error = "DeepSeek request timeout."
-                logger.warning("DeepSeek timeout", endpoint=endpoint, attempt=attempt + 1)
-                continue
-            except httpx.HTTPError as ex:
-                last_error = f"DeepSeek request error: {ex}"
-                logger.warning("DeepSeek HTTP error", endpoint=endpoint, attempt=attempt + 1, error=str(ex))
-                continue
+                except httpx.TimeoutException:
+                    last_error = "DeepSeek request timeout."
+                    logger.warning("DeepSeek timeout", endpoint=endpoint, attempt=attempt + 1)
+                    continue
+                except httpx.HTTPError as ex:
+                    last_error = f"DeepSeek request error: {ex}"
+                    logger.warning("DeepSeek HTTP error", endpoint=endpoint, attempt=attempt + 1, error=str(ex))
+                    continue
 
-            if resp.status_code == 404:
-                last_error = "DeepSeek endpoint not found."
-                logger.warning("DeepSeek endpoint not found", endpoint=endpoint)
-                break
-            if resp.status_code >= 400:
-                last_error = f"DeepSeek returned HTTP {resp.status_code}."
-                logger.warning(
-                    "DeepSeek non-success response",
-                    endpoint=endpoint,
-                    attempt=attempt + 1,
-                    status=resp.status_code,
-                    body_preview=resp.text[:300],
-                )
-                continue
-
-            try:
-                outer = resp.json()
-                content = outer["choices"][0]["message"]["content"]
-                if not content:
-                    raise ValueError("empty content")
-
-                parsed_title, parsed_content = _try_parse_json_payload(content)
-                generated_title = _ensure_rewritten_english_title(
-                    parsed_title,
-                    title,
-                    description,
-                    prompt_structure,
-                )
-                blog_content = (parsed_content or "").strip()
-
-                if not blog_content:
-                    fallback_text = _strip_json_prefix_noise(_clean_model_text(content))
-                    if not fallback_text:
-                        raise ValueError("empty blogContent")
-                    blog_content = fallback_text
-
-                blog_content = _to_html_from_text(blog_content)
-                if not blog_content:
-                    blog_content = _build_structured_fallback_html(
-                        title=generated_title,
-                        description=description,
-                        prompt_structure=prompt_structure,
-                        tone=tone,
+                if resp.status_code == 404:
+                    last_error = "DeepSeek endpoint not found."
+                    logger.warning("DeepSeek endpoint not found", endpoint=endpoint)
+                    break
+                if resp.status_code >= 400:
+                    last_error = f"DeepSeek returned HTTP {resp.status_code}."
+                    logger.warning(
+                        "DeepSeek non-success response",
+                        endpoint=endpoint,
+                        attempt=attempt + 1,
+                        status=resp.status_code,
+                        body_preview=resp.text[:300],
                     )
+                    continue
 
-                if _is_low_quality_or_echo(blog_content):
-                    if attempt < (retry_attempts - 1):
-                        continue
-                    blog_content = _build_structured_fallback_html(
-                        title=generated_title,
-                        description=description,
-                        prompt_structure=prompt_structure,
-                        tone=tone,
-                    )
+                try:
+                    outer = resp.json()
+                    content = outer["choices"][0]["message"]["content"]
+                    if not content:
+                        raise ValueError("empty content")
 
-                if len(blog_content) > MAX_CONTENT_LENGTH:
-                    blog_content = blog_content[:MAX_CONTENT_LENGTH]
-                blog_content = _remove_forbidden_markers(blog_content, generated_title)
-                blog_content = _remove_prompt_leakage(blog_content, prompt_structure)
-                logger.info(
-                    "AI blog generation succeeded",
-                    endpoint=endpoint,
-                    attempt=attempt + 1,
-                    output_title_len=len(generated_title),
-                    output_content_len=len(blog_content),
-                )
-                if _contains_vietnamese_signals(blog_content):
-                    blog_content = _build_structured_fallback_html(
-                        title=generated_title,
-                        description=description,
-                        prompt_structure=prompt_structure,
-                        tone=tone,
+                    parsed_title, parsed_content = _try_parse_json_payload(content)
+                    generated_title = _ensure_rewritten_english_title(
+                        parsed_title,
+                        title,
+                        description,
+                        prompt_structure,
                     )
-                return generated_title, blog_content
-            except (KeyError, ValueError, TypeError, json.JSONDecodeError):
-                last_error = "DeepSeek response parse failed."
-                logger.warning("DeepSeek parse failed", endpoint=endpoint, attempt=attempt + 1)
-                continue
+                    blog_content = (parsed_content or "").strip()
+
+                    if not blog_content:
+                        fallback_text = _strip_json_prefix_noise(_clean_model_text(content))
+                        if not fallback_text:
+                            raise ValueError("empty blogContent")
+                        blog_content = fallback_text
+
+                    blog_content = _to_html_from_text(blog_content)
+                    if not blog_content:
+                        blog_content = _build_structured_fallback_html(
+                            title=generated_title,
+                            description=description,
+                            prompt_structure=prompt_structure,
+                            tone=tone,
+                        )
+
+                    if _is_low_quality_or_echo(blog_content):
+                        if attempt < (retry_attempts - 1):
+                            continue
+                        blog_content = _build_structured_fallback_html(
+                            title=generated_title,
+                            description=description,
+                            prompt_structure=prompt_structure,
+                            tone=tone,
+                        )
+
+                    if len(blog_content) > MAX_CONTENT_LENGTH:
+                        blog_content = blog_content[:MAX_CONTENT_LENGTH]
+                    blog_content = _remove_forbidden_markers(blog_content, generated_title)
+                    blog_content = _remove_prompt_leakage(blog_content, prompt_structure)
+                    logger.info(
+                        "AI blog generation succeeded",
+                        endpoint=endpoint,
+                        attempt=attempt + 1,
+                        output_title_len=len(generated_title),
+                        output_content_len=len(blog_content),
+                    )
+                    if _contains_vietnamese_signals(blog_content):
+                        blog_content = _build_structured_fallback_html(
+                            title=generated_title,
+                            description=description,
+                            prompt_structure=prompt_structure,
+                            tone=tone,
+                        )
+                    result = (generated_title, blog_content)
+                    _cache_put(cache_key, result)
+                    return result
+                except (KeyError, ValueError, TypeError, json.JSONDecodeError):
+                    last_error = "DeepSeek response parse failed."
+                    logger.warning("DeepSeek parse failed", endpoint=endpoint, attempt=attempt + 1)
+                    continue
 
     fallback_title = _ensure_rewritten_english_title(
         None,
@@ -942,7 +1094,9 @@ Precontent rules (must comply):
             reason=last_error,
             output_len=len(fallback_html),
         )
-        return fallback_title, fallback_html
+        result = (fallback_title, fallback_html)
+        _cache_put(cache_key, result)
+        return result
     raise BlogContentGenerationError(last_error)
 
 
