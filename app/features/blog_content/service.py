@@ -16,6 +16,7 @@ from app.utils.text_utils import has_hard_profanity
 MAX_CONTENT_LENGTH = 10_000
 MIN_CONTENT_LENGTH = 3_000
 _PRECONTENT_CACHE: str | None = None
+_PRECONTENT_LOADED_PATH: str | None = None
 _GENERATE_CACHE_TTL_SECONDS = 300.0
 _GENERATE_CACHE_MAX_ITEMS = 128
 _GENERATE_RESULT_CACHE: dict[str, tuple[float, tuple[str, str]]] = {}
@@ -78,6 +79,22 @@ _UNSAFE_CONTENT_PATTERNS = [
     re.compile(r"conme", re.IGNORECASE),
 ]
 
+_SHORT_UNSAFE_TOKENS = (
+    " dm ", " dmm ", " dcm ", " vcl ", " clm ", " clmm ", " dit ", " deo ", " duma ", " dume ",
+)
+
+_INTENT_ANCHORS = [
+    "đồ chơi", "do choi", "toy", "toys", "children toy", "kids toy",
+    "bé", "tre em", "trẻ em", "phụ huynh", "phu huynh",
+    "parenting", "child development", "giáo dục trẻ em", "giao duc tre em",
+    "learning through play", "stem toy", "toy safety",
+]
+
+_OFF_TOPIC_HINTS = [
+    "chinh tri", "chính trị", "politics", "election", "review phim", "movie review",
+    "nấu ăn", "nau an", "recipe", "crypto", "chung khoan", "stock market",
+]
+
 
 def _build_contextual_fallback_suggestions(title: str, content: str) -> list[str]:
     combined = _normalize_for_check(f"{title} {content}")
@@ -103,12 +120,19 @@ def _build_contextual_fallback_suggestions(title: str, content: str) -> list[str
     ]
 
 
-def _normalize_for_check(value: str) -> str:
+def _has_vietnamese_diacritic(value: str) -> bool:
+    return bool(re.search(r"[ăâđêôơưáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]", (value or "").lower()))
+
+
+def _normalize_for_check(value: str, *, strip_diacritic: bool = True) -> str:
     lowered = (value or "").lower()
-    no_diacritic = "".join(
-        ch for ch in unicodedata.normalize("NFKD", lowered) if not unicodedata.combining(ch)
-    )
-    alpha_num_space = re.sub(r"[^a-z0-9\s]", " ", no_diacritic)
+    if strip_diacritic:
+        normalized = "".join(
+            ch for ch in unicodedata.normalize("NFKD", lowered) if not unicodedata.combining(ch)
+        )
+        alpha_num_space = re.sub(r"[^a-z0-9\s]", " ", normalized)
+    else:
+        alpha_num_space = re.sub(r"[^\w\s]", " ", lowered, flags=re.UNICODE)
     return re.sub(r"\s+", " ", alpha_num_space).strip()
 
 
@@ -162,11 +186,20 @@ def _cache_put(key: str, value: tuple[str, str]) -> None:
     _GENERATE_RESULT_CACHE[key] = (now, value)
 
 
+def _contains_keyword(normalized_text: str, keyword: str) -> bool:
+    normalized_kw = _normalize_for_check(keyword, strip_diacritic=True)
+    if not normalized_kw:
+        return False
+    if len(normalized_kw) < 5:
+        return re.search(rf"\b{re.escape(normalized_kw)}\b", normalized_text, flags=re.IGNORECASE) is not None
+    return f" {normalized_kw} " in f" {normalized_text} "
+
+
 def pre_check(topic: str) -> dict[str, str | list[str]] | None:
-    normalized_core = _normalize_for_check(topic)
+    normalized_core = _normalize_for_check(topic, strip_diacritic=True)
     normalized = f" {normalized_core} "
     for w in WHITELIST:
-        normalized = normalized.replace(f" {_normalize_for_check(w)} ", " ")
+        normalized = normalized.replace(f" {_normalize_for_check(w, strip_diacritic=True)} ", " ")
     normalized = re.sub(r"\s+", " ", normalized).strip()
 
     unsafe_match = _detect_unsafe_content(topic)
@@ -181,8 +214,7 @@ def pre_check(topic: str) -> dict[str, str | list[str]] | None:
 
     for violation_type, keywords in BLOCKED_KEYWORDS.items():
         for kw in keywords:
-            normalized_kw = _normalize_for_check(kw)
-            if f" {normalized_kw} " in f" {normalized} ":
+            if _contains_keyword(normalized, kw):
                 return {
                     "status": "blocked",
                     "violation_type": violation_type,
@@ -197,23 +229,63 @@ def _detect_unsafe_content(text: str) -> str | None:
     if has_hard_profanity(text):
         return "hard_profanity"
 
-    normalized = _normalize_for_check(text)
+    is_vietnamese = _has_vietnamese_diacritic(text)
+    normalized = _normalize_for_check(text, strip_diacritic=not is_vietnamese)
     tokenized = f" {normalized} "
-    for short_token in (
-        " dm ", " dmm ", " dcm ", " vcl ", " clm ", " clmm ", " dit ", " deo ",
-        " duma ", " dume ", " cac ", " lon ",
-    ):
+    for short_token in _SHORT_UNSAFE_TOKENS:
         if short_token in tokenized:
             return short_token.strip()
 
-    compact = re.sub(r"[^a-z0-9]", "", normalized.translate(_LEETSPEAK_MAP))
+    compact_source = normalized if is_vietnamese else normalized.translate(_LEETSPEAK_MAP)
+    compact = re.sub(r"[^a-z0-9]", "", compact_source)
     if not compact:
         return None
 
     for pattern in _UNSAFE_CONTENT_PATTERNS:
-        match = pattern.search(compact)
+        pattern_text = pattern.pattern
+        if len(pattern_text) < 5:
+            match = re.search(rf"\b{re.escape(pattern_text)}\b", compact, flags=re.IGNORECASE)
+        else:
+            match = pattern.search(compact)
         if match:
             return match.group(0)
+    return None
+
+
+def classify_intent(title: str, description: str | None, prompt_structure: str) -> dict[str, str | bool]:
+    combined = f"{title} {description or ''} {prompt_structure}"
+    normalized = _normalize_for_check(combined, strip_diacritic=True)
+    if not normalized:
+        return {
+            "is_relevant": False,
+            "reason": "Nội dung chưa đủ thông tin để xác định chủ đề phù hợp.",
+            "suggestion": "Hãy thêm ngữ cảnh về đồ chơi, phụ huynh hoặc phát triển trẻ em.",
+        }
+
+    anchor_hits = sum(1 for anchor in _INTENT_ANCHORS if anchor in normalized)
+    off_topic_hits = sum(1 for hint in _OFF_TOPIC_HINTS if hint in normalized)
+    token_count = max(1, len(normalized.split()))
+    relevance_score = min(1.0, (anchor_hits * 1.2) / token_count)
+
+    if anchor_hits == 0 and (off_topic_hits > 0 or relevance_score < 0.35):
+        return {
+            "is_relevant": False,
+            "reason": "Chủ đề không liên quan đến đồ chơi trẻ em, phụ huynh hoặc giáo dục trẻ.",
+            "suggestion": "Hãy chuyển prompt sang chủ đề toy store, ví dụ chọn đồ chơi theo độ tuổi hoặc toy safety.",
+        }
+
+    return {"is_relevant": True, "reason": "", "suggestion": ""}
+
+
+def _build_source_content_warning(source_content: str | None) -> str | None:
+    if not source_content:
+        return None
+    source_violation = _detect_unsafe_content(source_content)
+    if source_violation:
+        return (
+            "Nguồn nội dung cũ có dấu hiệu từ ngữ nhạy cảm, hệ thống tiếp tục generate cho Improve mode "
+            f"và bỏ qua block từ sourceContent (matched: {source_violation})."
+        )
     return None
 
 
@@ -291,23 +363,37 @@ Trả về JSON theo đúng format, không thêm text nào khác:
 
 
 def _load_precontent_rules() -> str:
-    global _PRECONTENT_CACHE
+    global _PRECONTENT_CACHE, _PRECONTENT_LOADED_PATH
     if _PRECONTENT_CACHE is not None:
         return _PRECONTENT_CACHE
 
-    precontent_path = Path(__file__).resolve().parents[1] / "moderation" / "text_pipeline" / "precontent.txt"
-    if not precontent_path.exists():
-        _PRECONTENT_CACHE = ""
-        return _PRECONTENT_CACHE
+    base_dir = Path(__file__).resolve().parents[1]
+    candidate_paths = [
+        base_dir / "moderation" / "product_review" / "text_pipeline" / "precontent.txt",
+        base_dir / "moderation" / "text_pipeline" / "precontent.txt",
+    ]
+    precontent_path = next((path for path in candidate_paths if path.exists()), None)
+    if precontent_path is None:
+        logger.error("Precontent rules file not found", candidate_paths=[str(path) for path in candidate_paths])
+        raise RuntimeError("Moderation rules failed to load: precontent.txt was not found.")
 
+    _PRECONTENT_LOADED_PATH = str(precontent_path)
     raw = precontent_path.read_bytes()
     for encoding in ("utf-8", "utf-8-sig", "cp1258", "latin-1"):
         try:
             _PRECONTENT_CACHE = raw.decode(encoding).strip()
+            if not _PRECONTENT_CACHE:
+                logger.error("Precontent rules loaded empty", path=_PRECONTENT_LOADED_PATH, encoding=encoding)
+                raise RuntimeError("Moderation rules failed to load: precontent.txt is empty.")
+            logger.info("Loaded precontent rules", path=_PRECONTENT_LOADED_PATH, encoding=encoding, chars=len(_PRECONTENT_CACHE))
             return _PRECONTENT_CACHE
         except UnicodeDecodeError:
             continue
     _PRECONTENT_CACHE = raw.decode("utf-8", errors="ignore").strip()
+    if not _PRECONTENT_CACHE:
+        logger.error("Precontent rules loaded empty after fallback decode", path=_PRECONTENT_LOADED_PATH)
+        raise RuntimeError("Moderation rules failed to load: precontent decode returned empty content.")
+    logger.info("Loaded precontent rules", path=_PRECONTENT_LOADED_PATH, encoding="utf-8-fallback", chars=len(_PRECONTENT_CACHE))
     return _PRECONTENT_CACHE
 
 
@@ -759,9 +845,20 @@ async def generate_blog_content(
         category_id=category_id,
     )
 
-    moderation_input = "\n".join(
-        [title or "", description or "", prompt_structure or "", source_content or ""]
-    )
+    # Gate 1: intent classification on user input only. Fail fast before prompt/model.
+    intent = classify_intent(title=title, description=description, prompt_structure=prompt_structure)
+    if not bool(intent.get("is_relevant")):
+        logger.info("Blog generation blocked by intent gate", reason=intent.get("reason"))
+        return {
+            "status": "blocked",
+            "violation_type": "out_of_scope",
+            "violated_keyword": "off_topic",
+            "reason": str(intent.get("reason", "Chủ đề không thuộc phạm vi website.")),
+            "suggestions": [str(intent.get("suggestion", DEFAULT_BLOCK_SUGGESTIONS[0]))] + DEFAULT_BLOCK_SUGGESTIONS[:3],
+        }
+
+    # Gate 2: strict moderation only on admin-provided fields (not sourceContent).
+    moderation_input = "\n".join([title or "", description or "", prompt_structure or ""])
     violation = pre_check(moderation_input)
     if violation:
         smart_suggestions = await generate_smart_suggestions(
@@ -777,6 +874,11 @@ async def generate_blog_content(
             violated_keyword=violation.get("violated_keyword"),
         )
         return violation
+
+    # Gate 2b: sourceContent is system-injected in Improve mode; never hard-block from this scope.
+    source_warning = _build_source_content_warning(source_content)
+    if source_warning:
+        logger.warning("Source content moderation warning", detail=source_warning)
 
     cache_key = _make_generate_cache_key(
         action=action,
@@ -810,6 +912,8 @@ async def generate_blog_content(
         "You are a senior blog writer for a children's toy e-commerce website. "
         "Understand Vietnamese and English input, but always output natural SEO-friendly English. "
         "Keep content family-safe and specific to toys, parenting, and child development. "
+        "Write strictly about the user-provided topic and intent. "
+        "Do not rewrite, redirect, or reinterpret off-topic requests into toy-store content. "
         "Avoid template-like phrasing and do not echo request metadata."
     )
     precontent_rules = _load_precontent_rules()
