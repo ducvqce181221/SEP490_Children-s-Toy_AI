@@ -3,6 +3,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.features.moderation.blog_comment.social_contact_detector import (
+    detect_social_contact_info,
+)
 from app.utils.text_utils import has_hard_profanity
 
 _URL_PATTERN = re.compile(
@@ -119,6 +122,15 @@ def run_blog_comment_prefilter(comment: str) -> BlogCommentPrefilterResult:
             category="spam",
             reason="Contains URL or shortened link",
             flag="rule_url_detected",
+        )
+
+    social_contact = detect_social_contact_info(comment)
+    if social_contact.detected:
+        return BlogCommentPrefilterResult(
+            rejected=True,
+            category="spam",
+            reason=social_contact.reason,
+            flag=social_contact.flag,
         )
 
     if _EMAIL_PATTERN.search(comment):

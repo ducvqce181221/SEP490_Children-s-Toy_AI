@@ -43,3 +43,46 @@ class TestBlogCommentPrefilter:
         assert result.rejected
         assert result.category == "spam"
 
+    def test_social_handle_tiktok_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("@besttoydeals")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_social_handle_instagram_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("@toystore_official")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_discord_contact_invite_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("add me on discord")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_external_contact_phrase_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("contact me via social media to discuss")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_username_on_tiktok_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("besttoydeals tren TikTok")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_instagram_lookup_phrase_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("find me on Instagram as toystore_official")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_x_twitter_dm_with_handle_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("dm me on X/Twitter @besttoyshop2026")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_off_platform_contact_phrase_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("let's talk off platform on telegram")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_regular_platform_discussion_is_not_rejected(self):
+        result = run_blog_comment_prefilter("Bai viet nay phan tich xu huong do choi tren instagram")
+        assert not result.rejected
