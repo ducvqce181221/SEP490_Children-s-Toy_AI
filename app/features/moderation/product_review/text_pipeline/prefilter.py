@@ -14,7 +14,7 @@ Reject ngay lập tức nếu:
 from __future__ import annotations
 
 import re
-from app.utils.text_utils import has_hard_profanity
+from app.utils.text_utils import has_hard_profanity, clean_and_normalize_text
 
 
 # ── Precompiled patterns ───────────────────────────────────────────────────────
@@ -38,6 +38,31 @@ _BANK_ACCOUNT_PATTERN = re.compile(
     r"\b\d{9,14}\b",
 )
 
+_SQL_PATTERN = re.compile(
+    r"\b(SELECT\s+[\s\S]*?\s+FROM|INSERT\s+INTO|UPDATE\s+[\s\S]*?\s+SET|DELETE\s+FROM|DROP\s+TABLE|UNION\s+SELECT)\b",
+    re.IGNORECASE
+)
+
+_EMAIL_PATTERN = re.compile(
+    r"\b[a-z0-9._%+-]+(?:\s*(?:dot|\.|\[dot\]|\(dot\))\s*[a-z0-9._%+-]+)*\s*(?:at|@|\[at\]|\(at\))\s*[a-z0-9.-]+\s*(?:dot|\.|\[dot\]|\(dot\))\s*[a-z]{2,}\b",
+    re.IGNORECASE
+)
+
+_SOCIAL_PATTERN = re.compile(
+    r"\b(follow\s+(?:us\s+|me\s+|my\s+)?(?:on\s+)?(?:instagram|ig|facebook|fb|tiktok|zalo|twitter|x)\b|@\w{3,})",
+    re.IGNORECASE
+)
+
+_SPAM_PATTERN = re.compile(
+    r"\b(click\s+now|click\s+here|free\s+rewards|get\s+free|free\s+gift|nhan\s+qua\s+mien\s+phi|nhan\s+thuong|click\s+vao|tang\s+qua)\b",
+    re.IGNORECASE
+)
+
+_INJECTION_PATTERN = re.compile(
+    r"\b(skip\s+all\s+validation|ignore\s+previous\s+rules|bypass\s+rules|internal\s+test\b)",
+    re.IGNORECASE
+)
+
 
 class PrefilterResult:
     __slots__ = ("rejected", "reason")
@@ -58,6 +83,9 @@ def find_sensitive_patterns(text: str) -> str | None:
     if _URL_PATTERN.search(text):
         return "Chứa URL hoặc link rút gọn"
 
+    if _EMAIL_PATTERN.search(text):
+        return "Chứa địa chỉ email (hoặc email viết ẩn danh)"
+
     if _VN_PHONE_PATTERN.search(text):
         return "Chứa số điện thoại Việt Nam"
 
@@ -65,6 +93,18 @@ def find_sensitive_patterns(text: str) -> str | None:
     bank_matches = _BANK_ACCOUNT_PATTERN.findall(text)
     if bank_matches:
         return "Chứa dãy số nghi là số tài khoản ngân hàng"
+
+    if _SQL_PATTERN.search(text):
+        return "Chứa cú pháp truy vấn cơ sở dữ liệu (SQL)"
+
+    if _SOCIAL_PATTERN.search(text):
+        return "Chứa thông tin liên hệ mạng xã hội / tự quảng cáo"
+
+    if _SPAM_PATTERN.search(text):
+        return "Chứa nội dung quảng cáo / spam lôi kéo"
+
+    if _INJECTION_PATTERN.search(text):
+        return "Nghi ngờ hành vi bypass bộ lọc kiểm duyệt (Instruction Injection)"
 
     return None
 
@@ -103,12 +143,18 @@ def run_prefilter(comment: str) -> PrefilterResult:
                 "Spam ký tự lặp: hơn 70% nội dung là cùng một ký tự",
             )
 
+    # Clean and normalize the text using advanced normalization
+    normalized = clean_and_normalize_text(comment)
+
     # 3. Profanity detection
-    if has_hard_profanity(comment):
+    if has_hard_profanity(comment) or has_hard_profanity(normalized):
         return PrefilterResult(True, "Chứa từ ngữ thô tục cực đoan (chặn tự động)")
 
     # 4-6. URL, Phone, and Bank Account detection
     sensitive_reason = find_sensitive_patterns(comment)
+    if not sensitive_reason:
+        sensitive_reason = find_sensitive_patterns(normalized)
+
     if sensitive_reason:
         return PrefilterResult(True, sensitive_reason)
 

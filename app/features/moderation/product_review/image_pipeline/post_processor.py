@@ -11,7 +11,7 @@ from app.features.moderation.product_review.image_pipeline.vision_client import 
 from app.features.moderation.product_review.image_pipeline.prefilter import PrefilterImageResult
 from app.features.moderation.schemas import ImagePipelineResult, ModerationDecision
 from app.features.moderation.product_review.text_pipeline.prefilter import find_sensitive_patterns
-from app.utils.text_utils import has_hard_profanity
+from app.utils.text_utils import has_hard_profanity, clean_and_normalize_text
 
 logger = get_logger(__name__)
 
@@ -33,7 +33,8 @@ def apply_vision_results(
         )
 
     if vision_result.detected_text:
-        if has_hard_profanity(vision_result.detected_text):
+        normalized_ocr = clean_and_normalize_text(vision_result.detected_text)
+        if has_hard_profanity(vision_result.detected_text) or has_hard_profanity(normalized_ocr):
             return ImagePipelineResult(
                 decision=ModerationDecision.REJECTED,
                 flags=["vision_profanity_violation"],
@@ -44,6 +45,9 @@ def apply_vision_results(
             )
 
         text_violation_reason = find_sensitive_patterns(vision_result.detected_text)
+        if not text_violation_reason:
+            text_violation_reason = find_sensitive_patterns(normalized_ocr)
+
         if text_violation_reason:
             return ImagePipelineResult(
                 decision=ModerationDecision.REJECTED,
