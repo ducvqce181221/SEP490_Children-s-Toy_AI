@@ -123,3 +123,35 @@ def test_ocr_profanity_rejected():
     assert result.decision == ModerationDecision.REJECTED
     assert "vision_profanity_violation" in result.flags
     assert "từ ngữ thô tục" in result.reason
+
+
+def test_ocr_obfuscated_phone_rejected():
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    vis_res = VisionAnalysisResult(
+        safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
+        labels=[{"description": "toy", "score": 0.9}],
+        hard_violation=False,
+        violation_reason=None,
+        toy_label_found=True,
+        detected_text="Call zero nine one two eight zero two zero three one",
+    )
+    result = apply_vision_results(pre_res, vis_res)
+    assert result.decision == ModerationDecision.REJECTED
+    assert "vision_text_violation" in result.flags
+    assert "Chứa số điện thoại Việt Nam" in result.reason
+
+
+def test_ocr_obfuscated_profanity_rejected():
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    vis_res = VisionAnalysisResult(
+        safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
+        labels=[{"description": "toy", "score": 0.9}],
+        hard_violation=False,
+        violation_reason=None,
+        toy_label_found=True,
+        detected_text="c-o-n c-ạ-c",
+    )
+    result = apply_vision_results(pre_res, vis_res)
+    assert result.decision == ModerationDecision.REJECTED
+    assert "vision_profanity_violation" in result.flags
+    assert "từ ngữ thô tục" in result.reason

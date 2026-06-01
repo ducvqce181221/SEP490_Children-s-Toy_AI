@@ -124,3 +124,48 @@ async def test_moderation_orchestrator_batch_processing(mocker):
     assert mock_repo.update_image_status.call_count == 2
     mock_repo.update_image_status.assert_any_call(10, ModerationStatus.APPROVED, "mockphash")
     mock_repo.update_image_status.assert_any_call(11, ModerationStatus.REJECTED, "mockphash")
+
+
+@pytest.mark.asyncio
+async def test_moderation_orchestrator_rating_only_review(mocker):
+    # Mock settings
+    mocker.patch("app.features.moderation.product_review.service.get_settings")
+
+    # Mock Repository
+    mock_repo = MagicMock()
+    mock_repo.fetch_images_for_review = AsyncMock(return_value=[])
+    mock_repo.get_existing_phashes = AsyncMock(return_value=[])
+    mock_repo.get_recent_rejected_count = AsyncMock(return_value=0)
+    mock_repo.update_review_status = AsyncMock()
+    mock_repo.insert_moderation_log = AsyncMock()
+
+    mocker.patch("app.features.moderation.product_review.service.ModerationRepository", return_value=mock_repo)
+
+    # Mock Notification
+    mock_notif = MagicMock()
+    mocker.patch("app.features.moderation.product_review.service.NotificationService", return_value=mock_notif)
+
+    orchestrator = ModerationOrchestrator()
+
+    # Review to process (empty comment, rating = 5)
+    review = ReviewRecord(
+        review_id=1,
+        account_id=2,
+        product_id=3,
+        order_id=4,
+        rating=5,
+        comment="",
+        moderation_status=ModerationStatus.PENDING,
+        created_at=datetime.utcnow(),
+    )
+
+    # Execute
+    await orchestrator.moderate_review(review)
+
+    # Assertions: should be APPROVED automatically
+    mock_repo.update_review_status.assert_called_once_with(1, ModerationStatus.APPROVED)
+    # Check that it logged correctly
+    mock_repo.insert_moderation_log.assert_called_once()
+    args, kwargs = mock_repo.insert_moderation_log.call_args
+    assert kwargs.get("action") == "Approved"
+    assert kwargs.get("reason") is None

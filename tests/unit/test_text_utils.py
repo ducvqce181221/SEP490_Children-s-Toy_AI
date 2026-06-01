@@ -47,3 +47,31 @@ def test_has_hard_profanity():
     assert not has_hard_profanity("Dịch vụ ổn định")
     assert not has_hard_profanity(None)
     assert not has_hard_profanity("")
+
+
+def test_clean_and_normalize_text():
+    from app.utils.text_utils import clean_and_normalize_text
+
+    # 1. Test teencode / obfuscated Vietnamese drug-related comment
+    teencode_text = "ne^u ba.n muo^'n mua ha`ng tra'ng thi` lie^n he^"
+    normalized_teencode = clean_and_normalize_text(teencode_text)
+    assert normalized_teencode == "neu ban muon mua hang trang thi lien he"
+
+    # 2. Test English phone number words
+    phone_words_eng = "zero nine one two eight zero two zero three one"
+    normalized_phone_eng = clean_and_normalize_text(phone_words_eng)
+    assert normalized_phone_eng == "0912802031"
+
+    # 3. Test Vietnamese phone number words
+    phone_words_vi = "khong chin mot hai tam khong hai khong ba mot"
+    normalized_phone_vi = clean_and_normalize_text(phone_words_vi)
+    assert normalized_phone_vi == "0912802031"
+
+    # 4. Test mixed language and obfuscation spacing (e.g. g un -> gun)
+    mixed_text = "If bạn want to mua a g un, please liên hệ sdt below"
+    normalized_mixed = clean_and_normalize_text(mixed_text)
+    assert normalized_mixed == "if ban want to mua a gun please lien he sdt below"
+
+    # 5. Null or empty cases
+    assert clean_and_normalize_text(None) == ""
+    assert clean_and_normalize_text("") == ""
