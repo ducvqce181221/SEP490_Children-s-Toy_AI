@@ -323,7 +323,7 @@ class BlogCommentModerationRepository:
             SELECT TOP 1 [BanReasonID], [Content]
             FROM [dbo].[BlogCommentBanReasons]
             ORDER BY
-                CASE WHEN [Content] = N'Content unsuitable for children' THEN 0 ELSE 1 END,
+                CASE WHEN [Content] = N'Insulting, abusive, discriminatory, or otherwise inappropriate content' THEN 0 ELSE 1 END,
                 [BanReasonID]
         """
         async with get_connection() as conn:
