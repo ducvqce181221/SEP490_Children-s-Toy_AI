@@ -31,12 +31,30 @@ TOY_KEYWORDS = {
     "toy", "game", "child", "play", "doll", "lego", "puzzle", "infant",
     "kid", "baby", "figure", "block", "plush", "stuffed", "board game",
     "educational", "toddler", "children", "playful",
+    # Costume & Character Pretend Play categories
+    "mask", "masque", "costume", "mascot", "fictional character", "superhero",
+    "cosplay", "pretend play", "roleplay", "character", "action figure", "merchandise"
 }
 
-SUSPICIOUS_LABELS = {
+REAL_WEAPON_LABELS = {
+    "firearm", "handgun", "rifle", "shotgun", "assault weapon", "tactical firearm",
+    "revolver", "military weapon", "machine gun", "carbine", "sniper rifle",
+    "ammunition", "weapon sales", "bullet", "ammunition belt"
+}
+
+AMBIGUOUS_WEAPON_LABELS = {
+    "weapon", "knife", "gun", "pistol"
+}
+
+TOY_WEAPON_INDICATORS = {
+    "toy", "water gun", "nerf", "blaster", "plaything", "plastic", "cartoon",
+    "water pistol", "child play weapon", "cosplay", "foam", "play weapon", "model"
+}
+
+OTHER_SUSPICIOUS_LABELS = {
     "fight", "fighting", "wrestling", "altercation", "aggression", "assault",
-    "physical conflict", "bullying", "weapon", "knife", "gun", "pistol",
-    "smoking", "alcohol", "beer", "wine", "gamble", "gambling", "casino",
+    "physical conflict", "bullying", "smoking", "alcohol", "beer", "wine",
+    "gamble", "gambling", "casino",
 }
 
 TOY_LABEL_MIN_SCORE = 0.6
@@ -144,22 +162,47 @@ class GoogleVisionClient:
         ]
 
         # Check for suspicious/violating content based on labels
+        has_toy_indicator = False
         if not hard_violation:
             for lbl in labels:
+                if lbl["score"] >= 0.50:
+                    desc = lbl["description"].lower()
+                    if any(indicator in desc for indicator in TOY_WEAPON_INDICATORS):
+                        has_toy_indicator = True
+                        break
+
+            for lbl in labels:
                 if lbl["score"] >= 0.60:
-                    desc = lbl["description"]
-                    if any(kw in desc for kw in SUSPICIOUS_LABELS):
+                    desc = lbl["description"].lower()
+
+                    # 1. Other Suspicious Labels (non-weapon, e.g. alcohol, gambling) are always rejected
+                    if any(other in desc for other in OTHER_SUSPICIOUS_LABELS):
                         hard_violation = True
                         violation_reason = f"suspicious content label detected: {desc}"
                         break
 
+                    # 2. Weapon checks (both real firearms and ambiguous weapons) are skipped entirely if a toy indicator is present
+                    if not has_toy_indicator:
+                        if any(real in desc for real in REAL_WEAPON_LABELS):
+                            hard_violation = True
+                            violation_reason = f"real weapon detected: {desc}"
+                            break
+
+                        if any(ambiguous in desc for ambiguous in AMBIGUOUS_WEAPON_LABELS):
+                            hard_violation = True
+                            violation_reason = f"unverified weapon/firearm detected: {desc}"
+                            break
+
         toy_label_found = False
         if not hard_violation:
-            for lbl in labels:
-                if lbl["score"] >= TOY_LABEL_MIN_SCORE:
-                    if any(kw in lbl["description"] for kw in TOY_KEYWORDS):
-                        toy_label_found = True
-                        break
+            if has_toy_indicator:
+                toy_label_found = True
+            else:
+                for lbl in labels:
+                    if lbl["score"] >= TOY_LABEL_MIN_SCORE:
+                        if any(kw in lbl["description"].lower() for kw in TOY_KEYWORDS):
+                            toy_label_found = True
+                            break
 
 
         detected_text = None

@@ -63,7 +63,14 @@ class _BaseModerationClient:
         content_type: str = "review",
         rating: int | None = None,
     ) -> dict[str, Any]:
-        user_message = build_user_prompt(content=comment, content_type=content_type, rating=rating)
+        from app.utils.text_utils import clean_and_normalize_text
+        normalized = clean_and_normalize_text(comment)
+        user_message = build_user_prompt(
+            content=comment,
+            content_type=content_type,
+            rating=rating,
+            normalized_content=normalized,
+        )
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
@@ -191,7 +198,14 @@ class BlogDeepSeekClient(_BaseModerationClient):
         content_type: str = "review",
         rating: int | None = None,
     ) -> dict[str, Any]:
-        user_message = build_user_prompt(content=comment, content_type=content_type, rating=rating)
+        from app.utils.text_utils import clean_and_normalize_text
+        normalized = clean_and_normalize_text(comment)
+        user_message = build_user_prompt(
+            content=comment,
+            content_type=content_type,
+            rating=rating,
+            normalized_content=normalized,
+        )
         payload = {
             "model": self._model,
             "messages": [

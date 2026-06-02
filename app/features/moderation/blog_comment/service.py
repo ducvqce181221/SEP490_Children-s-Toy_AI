@@ -1,24 +1,25 @@
 from __future__ import annotations
 
+import re
+
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.features.moderation.blog_comment.reason_mapper import (
     AI_UNAVAILABLE_REASON,
     map_ai_category_to_reason_content,
 )
+from app.features.moderation.blog_comment.prefilter import run_blog_comment_prefilter
 from app.features.moderation.blog_comment.repository import BlogCommentModerationRepository
 from app.features.moderation.blog_comment.retry_policy import BlogCommentRetryPolicy
 from app.features.moderation.schemas import (
     BlogCommentRecord,
-    BlogCommentTargetType,
     ModerationDecision,
     ModerationStatus,
     TextPipelineResult,
 )
 from app.features.moderation.blog_comment.violation_service import BlogCommentViolationService
-from app.features.moderation.product_review.text_pipeline.prefilter import run_prefilter
 from app.llm.client import get_blog_deepseek_client
-from app.utils.text_utils import has_hard_profanity
+from app.utils.text_utils import has_hard_profanity, normalize_vietnamese_text
 
 logger = get_logger(__name__)
 
@@ -59,6 +60,11 @@ _FORCE_REJECT_FLAGS: tuple[str, ...] = (
     "threat",
     "privacy",
     "doxx",
+    "email",
+    "phone",
+    "bank",
+    "address",
+    "contact",
 )
 
 _VIOLATION_REASON_TOKENS: tuple[str, ...] = (
@@ -72,6 +78,31 @@ _VIOLATION_REASON_TOKENS: tuple[str, ...] = (
     "hate",
     "sexual",
     "violent",
+    "privacy",
+    "personal",
+    "doxx",
+    "email",
+    "phone",
+    "address",
+)
+
+_PRIVACY_FLAG_TOKENS: tuple[str, ...] = (
+    "privacy",
+    "personal",
+    "doxx",
+    "email",
+    "phone",
+    "contact",
+    "address",
+    "bank",
+    "pii",
+)
+
+_EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+_PHONE_DIGIT_BLOCK_PATTERN = re.compile(r"(?<!\d)(?:\d[\s.\-]?){7,14}(?!\d)")
+_CONTACT_CUE_PATTERN = re.compile(
+    r"\b(email|mail|phone|tel|contact|zalo|whatsapp|telegram|address|addr|sdt|sdt[h]?|lien he|dia chi)\b",
+    re.IGNORECASE,
 )
 
 
@@ -105,21 +136,21 @@ class BlogCommentModerationService:
 
     async def _classify_comment(self, comment: str) -> TextPipelineResult:
         # 1. Run local prefilter rules
-        prefilter = run_prefilter(comment or "")
+        prefilter = run_blog_comment_prefilter(comment or "")
         if prefilter.rejected:
             logger.info("Blog comment prefilter rejected", reason=prefilter.reason)
             return TextPipelineResult(
                 decision=ModerationDecision.REJECTED,
-                category="spam",
+                category=prefilter.category,
                 confidence=1.0,
                 reason=prefilter.reason,
-                flags=["rule_prefilter_reject"],
+                flags=[prefilter.flag, "rule_prefilter_reject"] if prefilter.flag else ["rule_prefilter_reject"],
                 decided_by="prefilter",
                 raw_llm_result={
                     "decision": "REJECTED",
                     "confidence": 1.0,
-                    "category": "spam",
-                    "flags": ["rule_prefilter_reject"],
+                    "category": prefilter.category,
+                    "flags": [prefilter.flag, "rule_prefilter_reject"] if prefilter.flag else ["rule_prefilter_reject"],
                     "reason": prefilter.reason,
                 },
             )
@@ -259,9 +290,15 @@ class BlogCommentModerationService:
         )
 
     async def _reject(self, record: BlogCommentRecord, ai_result: TextPipelineResult) -> None:
+        reason_category = self._resolve_reason_category(
+            category=ai_result.category,
+            flags=ai_result.flags,
+            reason=ai_result.reason,
+            comment=record.comment or "",
+        )
         reason_content = map_ai_category_to_reason_content(
             decision=ai_result.decision,
-            category=ai_result.category,
+            category=reason_category,
         )
         reason = await self._repo.get_reason_by_content(reason_content or "")
         if reason is None:
@@ -320,3 +357,52 @@ class BlogCommentModerationService:
         if value == "REJECTED":
             return ModerationDecision.REJECTED
         return ModerationDecision.MANUAL_REVIEW
+
+    @staticmethod
+    def _resolve_reason_category(
+        *,
+        category: str,
+        flags: list[str],
+        reason: str,
+        comment: str,
+    ) -> str:
+        normalized_category = (category or "").strip().lower()
+        if normalized_category in {"privacy", "doxxing"}:
+            return "privacy"
+
+        if BlogCommentModerationService._has_privacy_signal(flags=flags, reason=reason, comment=comment):
+            return "privacy"
+
+        return normalized_category
+
+    @staticmethod
+    def _has_privacy_signal(*, flags: list[str], reason: str, comment: str) -> bool:
+        lowered_flags = [flag.lower() for flag in (flags or [])]
+        if any(any(token in flag for token in _PRIVACY_FLAG_TOKENS) for flag in lowered_flags):
+            return True
+
+        normalized_reason = normalize_vietnamese_text(reason or "")
+        if any(token in normalized_reason for token in _PRIVACY_FLAG_TOKENS):
+            return True
+
+        return BlogCommentModerationService._comment_looks_like_personal_info(comment)
+
+    @staticmethod
+    def _comment_looks_like_personal_info(comment: str) -> bool:
+        if not comment:
+            return False
+
+        if _EMAIL_PATTERN.search(comment):
+            return True
+
+        normalized_comment = normalize_vietnamese_text(comment)
+        has_contact_cue = _CONTACT_CUE_PATTERN.search(normalized_comment) is not None
+        digit_blocks = _PHONE_DIGIT_BLOCK_PATTERN.findall(comment)
+        if has_contact_cue and digit_blocks:
+            return True
+
+        digit_count = sum(1 for ch in comment if ch.isdigit())
+        if has_contact_cue and digit_count >= 7:
+            return True
+
+        return False
