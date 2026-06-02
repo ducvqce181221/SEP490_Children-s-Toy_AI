@@ -69,7 +69,6 @@ _OBFUSCATED_TERMS = (
     "cho",
 )
 
-
 def _build_obfuscated_word_pattern(word: str) -> re.Pattern[str]:
     letters = [re.escape(ch) for ch in word]
     middle = r"[\W_]*".join(letters)
@@ -224,9 +223,8 @@ def has_hard_profanity(text: str | None) -> bool:
     if any(pattern.search(normalized) for pattern in _HARD_PROFANITY_REGEX):
         return True
         
-    # 3. Compact space/punctuation-stripped bypass counter check
-    compact = "".join(ch for ch in normalized if ch.isalnum())
-    if any(kw in compact for kw in _COMPACT_HARD_PROFANITY_KEYWORDS):
+    # 3. Obfuscated token check with boundaries to avoid substring false positives
+    if any(pattern.search(normalized) for pattern in _OBFUSCATED_WORD_REGEX):
         return True
 
     return False

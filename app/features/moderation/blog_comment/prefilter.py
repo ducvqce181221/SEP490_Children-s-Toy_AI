@@ -3,6 +3,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.features.moderation.blog_comment.content_safety import (
+    detect_inappropriate_emoji_usage,
+    detect_meaningless_content,
+)
 from app.features.moderation.blog_comment.social_contact_detector import (
     detect_social_contact_info,
 )
@@ -112,9 +116,27 @@ def run_blog_comment_prefilter(comment: str) -> BlogCommentPrefilterResult:
             return BlogCommentPrefilterResult(
                 rejected=True,
                 category="spam",
-                reason="Repeated-character spam pattern detected",
-                flag="rule_repeated_char_spam",
-            )
+            reason="Repeated-character spam pattern detected",
+            flag="rule_repeated_char_spam",
+        )
+
+    meaningless_signal = detect_meaningless_content(comment)
+    if meaningless_signal.detected:
+        return BlogCommentPrefilterResult(
+            rejected=True,
+            category=meaningless_signal.category,
+            reason=meaningless_signal.reason,
+            flag=meaningless_signal.flag,
+        )
+
+    inappropriate_emoji_signal = detect_inappropriate_emoji_usage(comment)
+    if inappropriate_emoji_signal.detected:
+        return BlogCommentPrefilterResult(
+            rejected=True,
+            category=inappropriate_emoji_signal.category,
+            reason=inappropriate_emoji_signal.reason,
+            flag=inappropriate_emoji_signal.flag,
+        )
 
     if _URL_PATTERN.search(comment):
         return BlogCommentPrefilterResult(
