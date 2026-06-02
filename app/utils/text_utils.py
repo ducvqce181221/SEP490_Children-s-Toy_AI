@@ -15,8 +15,19 @@ _RAW_HARD_PROFANITY_WORDS = (
     "rác rưởi",
 )
 
+_LEET_MAP = str.maketrans({
+    "@": "a",
+    "$": "s",
+    "0": "o",
+    "1": "i",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+    "|": "i",
+})
+
 _HARD_PROFANITY_PATTERNS = (
-    # cặc / cạc / kặc / kac / cax / cak variations (only unambiguous ones)
     r"\bcon\s*cac\b",
     r"\bcon\s*kac\b",
     r"\bcon\s*cak\b",
@@ -26,28 +37,18 @@ _HARD_PROFANITY_PATTERNS = (
     r"\bcax\b",
     r"\bcka\b",
     r"\bkak\b",
-    
-    # lồn / loz / l0n / lozl (lol is removed to let LLM evaluate it contextually)
     r"\blon\b",
     r"\bloz\b",
     r"\blozl\b",
     r"\bl0n\b",
-    
-    # địt / djt / đệch
     r"\bdit\b",
     r"\bdjt\b",
     r"\bdech\b",
-    
-    # đéo / deo / de0
     r"\bdeo\b",
     r"\bde0\b",
-    
-    # chó / cko variations (unambiguous insults)
     r"\bcon\s*cko\b",
     r"\bcon\s*cho\b",
     r"\bcho\s*de\b",
-    
-    # đm / dmm / clm / clmm (vcl/vl/cl/sml removed to let LLM evaluate contextually)
     r"\bdm\b",
     r"\bdmm\b",
     r"\bclm\b",
@@ -56,22 +57,40 @@ _HARD_PROFANITY_PATTERNS = (
 
 _HARD_PROFANITY_REGEX = [re.compile(p, re.IGNORECASE) for p in _HARD_PROFANITY_PATTERNS]
 
-_COMPACT_HARD_PROFANITY_KEYWORDS = (
-    "concac", "conkac", "concak", "concax", "conlon", "condit", "condjt",
-    "ditconme", "djtconme", "djtme", "ditme", "chode",
-    "khonnan", "matday", "racruoi",
+_OBFUSCATED_TERMS = (
+    "cac",
+    "kac",
+    "cak",
+    "cax",
+    "lon",
+    "dit",
+    "djt",
+    "deo",
+    "cho",
 )
+
+
+def _build_obfuscated_word_pattern(word: str) -> re.Pattern[str]:
+    letters = [re.escape(ch) for ch in word]
+    middle = r"[\W_]*".join(letters)
+    return re.compile(rf"(?<![a-z0-9]){middle}(?![a-z0-9])", re.IGNORECASE)
+
+
+_OBFUSCATED_WORD_REGEX = [_build_obfuscated_word_pattern(term) for term in _OBFUSCATED_TERMS]
 
 
 def normalize_vietnamese_text(text: str | None) -> str:
     """
-    Normalize Vietnamese text by removing accents/diacritics,
-    converting to lowercase, replacing 'đ' with 'd', and normalizing whitespace.
+    Normalize for moderation matching:
+    - lowercase
+    - leetspeak canonicalization
+    - Vietnamese diacritics removal
+    - keep token boundaries (whitespace preserved, no global concatenation)
     """
     base = (text or "").strip().lower()
     if not base:
         return ""
-    base = base.replace("đ", "d")
+    base = base.translate(_LEET_MAP).replace("đ", "d")
     decomposed = unicodedata.normalize("NFKD", base)
     without_marks = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     return re.sub(r"\s+", " ", without_marks)
@@ -79,28 +98,23 @@ def normalize_vietnamese_text(text: str | None) -> str:
 
 def has_hard_profanity(text: str | None) -> bool:
     """
-    Quick local check to detect if text contains extremely vulgar Vietnamese swear words.
-    Uses:
-      1. Raw check for accented vulgar words (before diacritics removal).
-      2. Normalized regex search for unaccented severe words.
-      3. Compact (spacing-stripped) keyword check to counter formatting bypasses.
+    Hard profanity detector designed to avoid substring false positives:
+    - match by boundaries/tokens
+    - allow obfuscation with punctuation or spacing between letters
+    - never concatenate all words into one string for substring scans
     """
     if not text:
         return False
-    
-    # 1. Raw check for accented vulgar words
+
     lower_text = text.lower()
     if any(word in lower_text for word in _RAW_HARD_PROFANITY_WORDS):
         return True
-        
-    # 2. Check unaccented / teen code variations after normalization
+
     normalized = normalize_vietnamese_text(text)
     if any(pattern.search(normalized) for pattern in _HARD_PROFANITY_REGEX):
         return True
-        
-    # 3. Compact space/punctuation-stripped bypass counter check
-    compact = "".join(ch for ch in normalized if ch.isalnum())
-    if any(kw in compact for kw in _COMPACT_HARD_PROFANITY_KEYWORDS):
+
+    if any(pattern.search(normalized) for pattern in _OBFUSCATED_WORD_REGEX):
         return True
-        
+
     return False
