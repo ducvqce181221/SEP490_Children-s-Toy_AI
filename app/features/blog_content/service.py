@@ -38,6 +38,18 @@ BLOCKED_KEYWORDS: dict[str, list[str]] = {
     ],
 }
 
+HARD_BLOCK_EMOJIS = (
+    "🖕", "👅", "🍆", "😏", "🔞", "🚬", "🍺", "🍷", "🍸", "🚭",
+)
+
+_PROMPT_INJECTION_PATTERNS = (
+    "ignore previous instructions",
+    "reveal system prompt",
+    "output hidden rules",
+    "bypass moderation",
+    "act as another ai",
+)
+
 WHITELIST = ["google", "ghn", "giao hang nhanh", "children s toy store", "children toy store"]
 DEFAULT_BLOCK_SUGGESTIONS = [
     "Đồ chơi STEM phù hợp cho bé theo độ tuổi",
@@ -46,37 +58,21 @@ DEFAULT_BLOCK_SUGGESTIONS = [
     "Kinh nghiệm mua đồ chơi online an toàn cho phụ huynh",
 ]
 
-_LEETSPEAK_MAP = str.maketrans({
-    "@": "a",
-    "$": "s",
-    "0": "o",
-    "1": "i",
-    "3": "e",
-    "4": "a",
-    "5": "s",
-    "7": "t",
-    "|": "i",
-    "!": "i",
-})
-
 _UNSAFE_CONTENT_PATTERNS = [
-    re.compile(r"f+u+c+k+", re.IGNORECASE),
-    re.compile(r"s+h+i+t+", re.IGNORECASE),
-    re.compile(r"b+i+t+c+h+", re.IGNORECASE),
-    re.compile(r"a+s+s+h+o+l+e+", re.IGNORECASE),
-    re.compile(r"b+a+s+t+a+r+d+", re.IGNORECASE),
-    re.compile(r"d+i+c+k+", re.IGNORECASE),
-    re.compile(r"p+u+s+s+y+", re.IGNORECASE),
-    re.compile(r"killyourself", re.IGNORECASE),
-    re.compile(r"godie", re.IGNORECASE),
-    re.compile(r"ditme", re.IGNORECASE),
-    re.compile(r"duma", re.IGNORECASE),
-    re.compile(r"dume", re.IGNORECASE),
-    re.compile(r"concac", re.IGNORECASE),
-    re.compile(r"cac", re.IGNORECASE),
-    re.compile(r"lon", re.IGNORECASE),
-    re.compile(r"condi", re.IGNORECASE),
-    re.compile(r"conme", re.IGNORECASE),
+    re.compile(r"\bfuck\b", re.IGNORECASE),
+    re.compile(r"\bshit\b", re.IGNORECASE),
+    re.compile(r"\bbitch\b", re.IGNORECASE),
+    re.compile(r"\basshole\b", re.IGNORECASE),
+    re.compile(r"\bbastard\b", re.IGNORECASE),
+    re.compile(r"\bdick\b", re.IGNORECASE),
+    re.compile(r"\bpussy\b", re.IGNORECASE),
+    re.compile(r"\bkill\s+yourself\b", re.IGNORECASE),
+    re.compile(r"\bgo\s+die\b", re.IGNORECASE),
+    re.compile(r"\bditme\b", re.IGNORECASE),
+    re.compile(r"\bduma\b", re.IGNORECASE),
+    re.compile(r"\bdume\b", re.IGNORECASE),
+    re.compile(r"\bcon\s*di\b", re.IGNORECASE),
+    re.compile(r"\bcon\s*me\b", re.IGNORECASE),
 ]
 
 _SHORT_UNSAFE_TOKENS = (
@@ -94,6 +90,32 @@ _OFF_TOPIC_HINTS = [
     "chinh tri", "chính trị", "politics", "election", "review phim", "movie review",
     "nấu ăn", "nau an", "recipe", "crypto", "chung khoan", "stock market",
 ]
+_INTENT_BLOCK_CONFIDENCE = 0.75
+_INTENT_PASS_CONFIDENCE = 0.55
+
+_ALLOWED_DOMAIN_ANCHORS = (
+    "toy", "toys", "children", "child", "kids", "kid", "parenting", "learning", "stem",
+    "gift", "review", "safety", "seasonal", "outdoor", "role play", "creativity",
+    "anatomy", "skeleton", "brain", "doctor", "halloween", "dinosaur", "monster", "fantasy",
+    "water gun", "water blaster", "foam blaster",
+)
+
+_BLOCKED_DOMAIN_HINTS = (
+    "politics", "election", "religion debate", "cryptocurrency", "crypto", "forex",
+    "stock trading", "gambling", "adult content", "dating", "relationship advice",
+    "medical treatment", "hacking", "crime", "weapon", "drug usage",
+)
+
+_UNSAFE_THEME_HINTS = (
+    "death", "dead body", "corpse", "human remains", "terrifying", "terror", "horror",
+    "gore", "gory", "bloody", "blood bath", "dismember", "decapitated", "violent scene",
+    "graphic", "nightmare", "fear inducing",
+)
+
+_EDUCATIONAL_SAFETY_CONTEXT = (
+    "educational", "education", "learning", "stem", "anatomy", "biology", "science",
+    "model", "toy", "toys", "children", "kids", "child development", "role play",
+)
 
 
 def _build_contextual_fallback_suggestions(title: str, content: str) -> list[str]:
@@ -195,33 +217,76 @@ def _contains_keyword(normalized_text: str, keyword: str) -> bool:
     return f" {normalized_kw} " in f" {normalized_text} "
 
 
-def pre_check(topic: str) -> dict[str, str | list[str]] | None:
-    normalized_core = _normalize_for_check(topic, strip_diacritic=True)
-    normalized = f" {normalized_core} "
-    for w in WHITELIST:
-        normalized = normalized.replace(f" {_normalize_for_check(w, strip_diacritic=True)} ", " ")
-    normalized = re.sub(r"\s+", " ", normalized).strip()
+def _build_user_context(title: str, prompt_structure: str) -> str:
+    return f"{title.strip()}\n{prompt_structure.strip()}".strip()
 
-    unsafe_match = _detect_unsafe_content(topic)
+
+def _check_hard_block_emoji(title: str, prompt_structure: str) -> str | None:
+    context = _build_user_context(title, prompt_structure)
+    for emoji in HARD_BLOCK_EMOJIS:
+        if emoji in context:
+            return emoji
+    return None
+
+
+def _detect_prompt_injection(title: str, prompt_structure: str) -> str | None:
+    normalized = _normalize_for_check(_build_user_context(title, prompt_structure), strip_diacritic=True)
+    for phrase in _PROMPT_INJECTION_PATTERNS:
+        if phrase in normalized:
+            return phrase
+    return None
+
+
+def _detect_contextual_unsafe_theme(title: str, prompt_structure: str) -> str | None:
+    normalized = _normalize_for_check(_build_user_context(title, prompt_structure), strip_diacritic=True)
+    unsafe_hits = [hint for hint in _UNSAFE_THEME_HINTS if hint in normalized]
+    if not unsafe_hits:
+        return None
+
+    edu_hits = [hint for hint in _EDUCATIONAL_SAFETY_CONTEXT if hint in normalized]
+    graphic_only_hits = [hint for hint in unsafe_hits if hint in {"human remains", "gore", "gory", "dismember", "decapitated", "graphic"}]
+
+    # Block when unsafe theme dominates or any graphic indicator appears.
+    if graphic_only_hits:
+        return graphic_only_hits[0]
+    if len(unsafe_hits) >= 2 and len(edu_hits) == 0:
+        return unsafe_hits[0]
+    if len(unsafe_hits) >= 3 and len(edu_hits) <= 1:
+        return unsafe_hits[0]
+    return None
+
+
+def safety_check(title: str, prompt_structure: str) -> dict[str, str | list[str]] | None:
+    context = _build_user_context(title, prompt_structure)
+    injection = _detect_prompt_injection(title, prompt_structure)
+    if injection:
+        return {
+            "status": "blocked",
+            "violation_type": "unsafe_content",
+            "violated_keyword": injection,
+            "reason": "prompt_injection",
+            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+        }
+
+    contextual_unsafe = _detect_contextual_unsafe_theme(title, prompt_structure)
+    if contextual_unsafe:
+        return {
+            "status": "blocked",
+            "violation_type": "unsafe_content",
+            "violated_keyword": contextual_unsafe,
+            "reason": "unsafe_content",
+            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+        }
+
+    unsafe_match = _detect_unsafe_content(context)
     if unsafe_match:
         return {
             "status": "blocked",
             "violation_type": "unsafe_content",
             "violated_keyword": unsafe_match,
-            "reason": "Nội dung chứa từ ngữ tục tĩu, xúc phạm hoặc toxic, không phù hợp với môi trường trẻ em.",
+            "reason": "unsafe_content",
             "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
         }
-
-    for violation_type, keywords in BLOCKED_KEYWORDS.items():
-        for kw in keywords:
-            if _contains_keyword(normalized, kw):
-                return {
-                    "status": "blocked",
-                    "violation_type": violation_type,
-                    "violated_keyword": kw,
-                    "reason": f"Chủ đề đề cập đến '{kw}' không thuộc phạm vi Children's Toy Store.",
-                    "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
-                }
     return None
 
 
@@ -236,45 +301,74 @@ def _detect_unsafe_content(text: str) -> str | None:
         if short_token in tokenized:
             return short_token.strip()
 
-    compact_source = normalized if is_vietnamese else normalized.translate(_LEETSPEAK_MAP)
-    compact = re.sub(r"[^a-z0-9]", "", compact_source)
-    if not compact:
-        return None
-
     for pattern in _UNSAFE_CONTENT_PATTERNS:
-        pattern_text = pattern.pattern
-        if len(pattern_text) < 5:
-            match = re.search(rf"\b{re.escape(pattern_text)}\b", compact, flags=re.IGNORECASE)
-        else:
-            match = pattern.search(compact)
+        match = pattern.search(normalized)
         if match:
             return match.group(0)
     return None
 
 
-def classify_intent(title: str, description: str | None, prompt_structure: str) -> dict[str, str | bool]:
-    combined = f"{title} {description or ''} {prompt_structure}"
+def _fallback_intent_classification(
+    title: str,
+    description: str | None,
+    prompt_structure: str,
+    category_id: int,
+) -> dict[str, str | bool | float]:
+    combined = _build_user_context(title, prompt_structure)
     normalized = _normalize_for_check(combined, strip_diacritic=True)
     if not normalized:
         return {
             "is_relevant": False,
-            "reason": "Nội dung chưa đủ thông tin để xác định chủ đề phù hợp.",
+            "confidence": 0.95,
+            "reason": "off_topic",
             "suggestion": "Hãy thêm ngữ cảnh về đồ chơi, phụ huynh hoặc phát triển trẻ em.",
+            "decision": "block",
+            "source": "heuristic",
         }
 
-    anchor_hits = sum(1 for anchor in _INTENT_ANCHORS if anchor in normalized)
-    off_topic_hits = sum(1 for hint in _OFF_TOPIC_HINTS if hint in normalized)
+    anchor_hits = sum(1 for anchor in _ALLOWED_DOMAIN_ANCHORS if anchor in normalized)
+    off_topic_hits = sum(1 for hint in _BLOCKED_DOMAIN_HINTS if hint in normalized)
     token_count = max(1, len(normalized.split()))
-    relevance_score = min(1.0, (anchor_hits * 1.2) / token_count)
+    relevance_score = min(1.0, ((anchor_hits * 1.3) + (0.8 if category_id > 0 else 0.0)) / token_count)
 
-    if anchor_hits == 0 and (off_topic_hits > 0 or relevance_score < 0.35):
+    if off_topic_hits > 0 and anchor_hits == 0:
         return {
             "is_relevant": False,
-            "reason": "Chủ đề không liên quan đến đồ chơi trẻ em, phụ huynh hoặc giáo dục trẻ.",
+            "confidence": 0.9,
+            "reason": "off_topic",
             "suggestion": "Hãy chuyển prompt sang chủ đề toy store, ví dụ chọn đồ chơi theo độ tuổi hoặc toy safety.",
+            "decision": "block",
+            "source": "heuristic",
         }
 
-    return {"is_relevant": True, "reason": "", "suggestion": ""}
+    if relevance_score >= _INTENT_PASS_CONFIDENCE:
+        return {
+            "is_relevant": True,
+            "confidence": relevance_score,
+            "reason": "",
+            "suggestion": "",
+            "decision": "pass",
+            "source": "heuristic",
+        }
+
+    return {
+        "is_relevant": True,
+        "confidence": relevance_score,
+        "reason": "Intent chưa rõ hoàn toàn, cho phép đi tiếp để tránh block nhầm.",
+        "suggestion": "",
+        "decision": "review",
+        "source": "heuristic",
+    }
+
+
+async def classify_intent(
+    *,
+    title: str,
+    description: str | None,
+    prompt_structure: str,
+    category_id: int,
+) -> dict[str, str | bool | float]:
+    return _fallback_intent_classification(title, description, prompt_structure, category_id)
 
 
 def _build_source_content_warning(source_content: str | None) -> str | None:
@@ -520,6 +614,22 @@ def _remove_prompt_leakage(content_html: str, prompt_structure: str) -> str:
         )
     cleaned = re.sub(r"<ul>\s*</ul>", "", cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
+
+
+def output_validation(content_html: str) -> tuple[str, str]:
+    cleaned = content_html
+    for emoji in HARD_BLOCK_EMOJIS:
+        cleaned = cleaned.replace(emoji, "")
+
+    unsafe_marker = _detect_unsafe_content(cleaned)
+    if unsafe_marker:
+        return "reject", unsafe_marker
+
+    normalized = _normalize_for_check(cleaned, strip_diacritic=True)
+    if any(marker in normalized for marker in ("hate", "racist", "ethnic cleansing")):
+        return "reject", "hate_content"
+
+    return "pass", cleaned
 
 
 
@@ -845,21 +955,58 @@ async def generate_blog_content(
         category_id=category_id,
     )
 
-    # Gate 1: intent classification on user input only. Fail fast before prompt/model.
-    intent = classify_intent(title=title, description=description, prompt_structure=prompt_structure)
-    if not bool(intent.get("is_relevant")):
-        logger.info("Blog generation blocked by intent gate", reason=intent.get("reason"))
+    # Step 1: Validate request (user scope only).
+    if not (title or "").strip() or not (prompt_structure or "").strip() or category_id <= 0:
+        return {
+            "status": "blocked",
+            "violation_type": "unsafe_content",
+            "violated_keyword": "validation_error",
+            "reason": "invalid_request",
+            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+        }
+
+    # Step 2: Emoji check (hard block list) on user scope only.
+    blocked_emoji = _check_hard_block_emoji(title, prompt_structure)
+    if blocked_emoji:
+        return {
+            "status": "blocked",
+            "violation_type": "unsafe_content",
+            "violated_keyword": blocked_emoji,
+            "reason": "inappropriate_emoji",
+            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+        }
+
+    # Step 3: classify_intent() on user scope only.
+    intent = await classify_intent(
+        title=title,
+        description=description,
+        prompt_structure=prompt_structure,
+        category_id=category_id,
+    )
+    if str(intent.get("decision")) == "block":
+        logger.info(
+            "Blog generation blocked by intent gate",
+            reason=intent.get("reason"),
+            confidence=intent.get("confidence"),
+            source=intent.get("source"),
+        )
         return {
             "status": "blocked",
             "violation_type": "out_of_scope",
             "violated_keyword": "off_topic",
-            "reason": str(intent.get("reason", "Chủ đề không thuộc phạm vi website.")),
+            "reason": "off_topic",
             "suggestions": [str(intent.get("suggestion", DEFAULT_BLOCK_SUGGESTIONS[0]))] + DEFAULT_BLOCK_SUGGESTIONS[:3],
         }
+    if str(intent.get("decision")) == "review":
+        logger.info(
+            "Intent gate uncertain, allow generation",
+            reason=intent.get("reason"),
+            confidence=intent.get("confidence"),
+            source=intent.get("source"),
+        )
 
-    # Gate 2: strict moderation only on admin-provided fields (not sourceContent).
-    moderation_input = "\n".join([title or "", description or "", prompt_structure or ""])
-    violation = pre_check(moderation_input)
+    # Step 4: safety_check() on user scope only.
+    violation = safety_check(title=title, prompt_structure=prompt_structure)
     if violation:
         smart_suggestions = await generate_smart_suggestions(
             title=title,
@@ -875,7 +1022,7 @@ async def generate_blog_content(
         )
         return violation
 
-    # Gate 2b: sourceContent is system-injected in Improve mode; never hard-block from this scope.
+    # SourceContent is system scope and never causes blocking.
     source_warning = _build_source_content_warning(source_content)
     if source_warning:
         logger.warning("Source content moderation warning", detail=source_warning)
@@ -908,6 +1055,7 @@ async def generate_blog_content(
         tone=tone,
     )
 
+    # Step 5: build_prompt().
     system_prompt = (
         "You are a senior blog writer for a children's toy e-commerce website. "
         "Understand Vietnamese and English input, but always output natural SEO-friendly English. "
@@ -966,6 +1114,7 @@ Precontent rules (must comply):
     per_request_timeout = settings.blog_deepseek_timeout_seconds
     retry_attempts = settings.blog_deepseek_retry_attempts
 
+    # Step 6: call_model().
     async with httpx.AsyncClient(timeout=per_request_timeout) as client:
         for endpoint in endpoints:
             for attempt in range(retry_attempts):
@@ -1065,7 +1214,18 @@ Precontent rules (must comply):
                             prompt_structure=prompt_structure,
                             tone=tone,
                         )
-                    result = (generated_title, blog_content)
+                    # Step 7: output_validation().
+                    validation_status, validation_payload = output_validation(blog_content)
+                    if validation_status == "reject":
+                        return {
+                            "status": "blocked",
+                            "violation_type": "unsafe_content",
+                            "violated_keyword": str(validation_payload),
+                            "reason": "unsafe_output",
+                            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+                        }
+
+                    result = (generated_title, validation_payload)
                     _cache_put(cache_key, result)
                     return result
                 except (KeyError, ValueError, TypeError, json.JSONDecodeError):
@@ -1089,12 +1249,21 @@ Precontent rules (must comply):
         fallback_html = fallback_html[:MAX_CONTENT_LENGTH]
     fallback_html = _remove_prompt_leakage(fallback_html, prompt_structure)
     if fallback_html:
+        validation_status, validation_payload = output_validation(fallback_html)
+        if validation_status == "reject":
+            return {
+                "status": "blocked",
+                "violation_type": "unsafe_content",
+                "violated_keyword": str(validation_payload),
+                "reason": "unsafe_output",
+                "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+            }
         logger.warning(
             "Using fallback blog content after AI failure",
             reason=last_error,
             output_len=len(fallback_html),
         )
-        result = (fallback_title, fallback_html)
+        result = (fallback_title, validation_payload)
         _cache_put(cache_key, result)
         return result
     raise BlogContentGenerationError(last_error)
