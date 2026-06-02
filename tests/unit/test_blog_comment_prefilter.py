@@ -43,6 +43,50 @@ class TestBlogCommentPrefilter:
         assert result.rejected
         assert result.category == "spam"
 
+    def test_symbol_only_noise_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("............")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_repeated_meaningless_phrase_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("test test test test")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_repeated_pattern_token_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("asdasdasd")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_keyboard_walk_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("qwertyuiop")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_numeric_noise_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("123123123123")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_multi_token_gibberish_is_rejected_as_spam(self):
+        result = run_blog_comment_prefilter("IH DKSDjndoua mhnjdasdjkad m")
+        assert result.rejected
+        assert result.category == "spam"
+
+    def test_emoji_only_inappropriate_content_is_rejected(self):
+        result = run_blog_comment_prefilter("🖕🖕")
+        assert result.rejected
+        assert result.category == "offensive"
+
+    def test_emoji_dominant_inappropriate_content_is_rejected(self):
+        result = run_blog_comment_prefilter("🍺🍻 ngon")
+        assert result.rejected
+        assert result.category == "adult"
+
+    def test_neutral_discussion_with_blocked_emoji_is_not_rejected(self):
+        result = run_blog_comment_prefilter("Bai viet nay dang giai thich vi sao emoji 🤤 co the bi hieu sai")
+        assert not result.rejected
+
     def test_social_handle_tiktok_is_rejected_as_spam(self):
         result = run_blog_comment_prefilter("@besttoydeals")
         assert result.rejected
