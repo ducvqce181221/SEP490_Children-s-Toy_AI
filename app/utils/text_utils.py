@@ -58,7 +58,6 @@ _HARD_PROFANITY_PATTERNS = (
 _HARD_PROFANITY_REGEX = [re.compile(p, re.IGNORECASE) for p in _HARD_PROFANITY_PATTERNS]
 
 _OBFUSCATED_TERMS = (
-    "cac",
     "kac",
     "cak",
     "cax",
@@ -66,13 +65,27 @@ _OBFUSCATED_TERMS = (
     "dit",
     "djt",
     "deo",
-    "cho",
 )
 
 def _build_obfuscated_word_pattern(word: str) -> re.Pattern[str]:
     letters = [re.escape(ch) for ch in word]
     middle = r"[\W_]*".join(letters)
     return re.compile(rf"(?<![a-z0-9]){middle}(?![a-z0-9])", re.IGNORECASE)
+
+
+def _build_obfuscated_phrase_pattern(*words: str) -> re.Pattern[str]:
+    parts = [r"[\W_]*".join(re.escape(ch) for ch in word) for word in words]
+    return re.compile(rf"(?<![a-z0-9]){r'[\W_]+'.join(parts)}(?![a-z0-9])", re.IGNORECASE)
+
+
+_OBFUSCATED_PHRASE_REGEX = [
+    _build_obfuscated_phrase_pattern("con", "cac"),
+    _build_obfuscated_phrase_pattern("con", "kac"),
+    _build_obfuscated_phrase_pattern("con", "cak"),
+    _build_obfuscated_phrase_pattern("con", "cax"),
+    _build_obfuscated_phrase_pattern("con", "cko"),
+    _build_obfuscated_phrase_pattern("cho", "de"),
+]
 
 
 _OBFUSCATED_WORD_REGEX = [_build_obfuscated_word_pattern(term) for term in _OBFUSCATED_TERMS]
@@ -223,7 +236,11 @@ def has_hard_profanity(text: str | None) -> bool:
     if any(pattern.search(normalized) for pattern in _HARD_PROFANITY_REGEX):
         return True
         
-    # 3. Obfuscated token check with boundaries to avoid substring false positives
+    # 3. Contextual obfuscated phrase check for ambiguous Vietnamese tokens.
+    if any(pattern.search(normalized) for pattern in _OBFUSCATED_PHRASE_REGEX):
+        return True
+
+    # 4. Obfuscated token check with boundaries to avoid substring false positives
     if any(pattern.search(normalized) for pattern in _OBFUSCATED_WORD_REGEX):
         return True
 
