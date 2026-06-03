@@ -29,8 +29,8 @@ class BlogContentGenerationError(RuntimeError):
 
 BLOCKED_KEYWORDS: dict[str, list[str]] = {
     "brand_external": [
-        "mykingdom", "ti ni", "lazada", "shopee",
-        "tiki", "sendo", "amazon", "bibo mart", "fahasa",
+        "mykingdom", "my kingdom", "ti ni", "tini", "tini store", "tiniworld",
+        "lazada", "shopee", "tiki", "sendo", "amazon", "bibo mart", "fahasa",
     ],
     "topic_restricted": [
         "chinh tri", "ton giao", "bao luc", "co bac",
@@ -217,6 +217,14 @@ def _contains_keyword(normalized_text: str, keyword: str) -> bool:
     return f" {normalized_kw} " in f" {normalized_text} "
 
 
+def _detect_external_brand(title: str, prompt_structure: str) -> str | None:
+    normalized = _normalize_for_check(_build_user_context(title, prompt_structure), strip_diacritic=True)
+    for keyword in BLOCKED_KEYWORDS["brand_external"]:
+        if _contains_keyword(normalized, keyword):
+            return keyword
+    return None
+
+
 def _build_user_context(title: str, prompt_structure: str) -> str:
     return f"{title.strip()}\n{prompt_structure.strip()}".strip()
 
@@ -266,6 +274,16 @@ def safety_check(title: str, prompt_structure: str) -> dict[str, str | list[str]
             "violated_keyword": injection,
             "reason": "prompt_injection",
             "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+        }
+
+    external_brand = _detect_external_brand(title, prompt_structure)
+    if external_brand:
+        return {
+            "status": "blocked",
+            "violation_type": "brand_external",
+            "violated_keyword": external_brand,
+            "reason": "external_brand",
+            "suggestions": _build_contextual_fallback_suggestions(title, prompt_structure)[:4],
         }
 
     contextual_unsafe = _detect_contextual_unsafe_theme(title, prompt_structure)
