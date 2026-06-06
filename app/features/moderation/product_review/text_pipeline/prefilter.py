@@ -28,10 +28,12 @@ _URL_PATTERN = re.compile(
 )
 
 _VN_PHONE_PATTERN = re.compile(
-    r"(?<!\d)"            # not preceded by digit
-    r"(0[0-9]{8,9}"       # 0xxxxxxxxx or 0xxxxxxxxxx
-    r"|\+84[0-9]{8,9})"   # +84xxxxxxxxx
-    r"(?!\d)",            # not followed by digit
+    r"(?<!\d|\w)"            # not preceded by digit or word character
+    r"(?:0|\+84)"           # starts with 0 or +84
+    r"(?:3|5|7|8|9)"        # valid mobile prefixes
+    r"[0-9x*._\-]{3,12}"    # followed by 3 to 12 digits/obfuscations
+    r"(?!\d|\w)",           # not followed by digit or word character
+    re.IGNORECASE,
 )
 
 _BANK_ACCOUNT_PATTERN = re.compile(
@@ -49,7 +51,12 @@ _EMAIL_PATTERN = re.compile(
 )
 
 _SOCIAL_PATTERN = re.compile(
-    r"\b(follow\s+(?:us\s+|me\s+|my\s+)?(?:on\s+)?(?:instagram|ig|facebook|fb|tiktok|zalo|twitter|x)\b|@\w{3,})",
+    r"\b(follow\s+(?:us\s+|me\s+|my\s+)?(?:on\s+)?(?:instagram|ig|facebook|fb|tiktok|zalo|twitter|x)"
+    r"|lh\s*(?:qua\s*)?(?:zalo|sdt|fb|ib|tele|mess|viber)"
+    r"|lien\s*he\s*(?:qua\s*)?(?:zalo|sdt|fb|ib|tele|mess|viber)"
+    r"|ib\s*(?:qua\s*)?(?:zalo|sdt|fb|tele|mess)"
+    r"|zalo\s*(?:lh|lien\s*he|ib|inbox|sdt)"
+    r"|@\w{3,})\b",
     re.IGNORECASE
 )
 
@@ -59,7 +66,10 @@ _SPAM_PATTERN = re.compile(
 )
 
 _INJECTION_PATTERN = re.compile(
-    r"\b(skip\s+all\s+validation|ignore\s+previous\s+rules|bypass\s+rules|internal\s+test\b)",
+    r"\b(skip\s+all\s+validation|ignore\s+previous\s+rules|bypass\s+rules|internal\s+test"
+    r"|bo\s+qua\s+quy\s+tac|bo\s+qua\s+cac\s+quy\s+tac|bo\s+qua\s+rule"
+    r"|khong\s+duoc\s+approved|khong\s+duoc\s+duyet"
+    r"|hay\s+xuat\s+ra\s+ket\s+qua|yeu\s+cau\s+xuat\s+ra)\b",
     re.IGNORECASE
 )
 
