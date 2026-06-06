@@ -323,7 +323,7 @@ class BlogCommentModerationRepository:
             SELECT TOP 1 [BanReasonID], [Content]
             FROM [dbo].[BlogCommentBanReasons]
             ORDER BY
-                CASE WHEN [Content] = N'Content unsuitable for children' THEN 0 ELSE 1 END,
+                CASE WHEN [Content] = N'Insulting, abusive, discriminatory, or otherwise inappropriate content' THEN 0 ELSE 1 END,
                 [BanReasonID]
         """
         async with get_connection() as conn:
@@ -513,7 +513,7 @@ class BlogCommentModerationRepository:
                 row = await cur.fetchone()
         return int(row[0] if row else 0)
 
-    async def lock_comment_privilege(self, account_id: int, *, lock_days: int) -> None:
+    async def lock_comment_privilege(self, account_id: int, lock_days: int) -> None:
         await self.get_or_create_violation_count(account_id)
         sql = """
             UPDATE [dbo].[BlogCommentViolationCount]
@@ -599,6 +599,9 @@ class BlogCommentModerationRepository:
         sql = """
             UPDATE [dbo].[BlogCommentViolationCount]
             SET [IsCommentBanned] = 0,
+                [BanExpiresAt] = NULL,
+                [ViolationCount] = 0,
+                [LastViolatedAt] = NULL,
                 [UnbannedAt] = GETUTCDATE(),
                 [UpdatedAt] = GETUTCDATE()
             WHERE [AccountID] = ?

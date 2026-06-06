@@ -156,6 +156,28 @@ class ModerationOrchestrator:
                     else:
                         img_pipeline_res = apply_vision_results(prefilter_res, v_res_or_exc)
 
+                        # Run semantic check on OCR text of images if approved and contains OCR text
+                        if img_pipeline_res.decision == ModerationDecision.APPROVED and v_res_or_exc.detected_text:
+                            meaningful_ocr_len = sum(1 for ch in v_res_or_exc.detected_text if ch.isalnum())
+                            if meaningful_ocr_len >= 5:
+                                ocr_llm_res = await run_llm_classifier(
+                                    comment=v_res_or_exc.detected_text,
+                                    rating=review.rating or 5
+                                )
+                                if ocr_llm_res.decision != ModerationDecision.APPROVED:
+                                    img_pipeline_res = ImagePipelineResult(
+                                        decision=ocr_llm_res.decision,
+                                        flags=ocr_llm_res.flags + ["vision_ocr_llm"],
+                                        reason=f"Phát hiện nội dung không hợp lệ trong ảnh: {ocr_llm_res.reason}",
+                                        decided_by="vision_ocr_llm",
+                                        phash=prefilter_res.phash,
+                                        raw_vision_result={
+                                            **v_res_or_exc.raw_response,
+                                            "ocr_llm_decision": ocr_llm_res.decision.value,
+                                            "ocr_llm_reason": ocr_llm_res.reason
+                                        }
+                                    )
+
                     image_results.append((img_record.review_product_image_id, img_pipeline_res))
 
         final_decision = self._aggregate_decision(text_result, image_results)
@@ -198,7 +220,15 @@ class ModerationOrchestrator:
         logger.info("Moderation complete", review_id=review.review_id, final_decision=final_decision)
 
     async def _run_text_pipeline(self, review: ReviewRecord) -> TextPipelineResult:
-        comment = review.comment or ""
+        comment = (review.comment or "").strip()
+        # Nếu đánh giá rỗng (rating-only review không kèm comment), tự động APPROVED cho phần text
+        if not comment:
+            return TextPipelineResult(
+                decision=ModerationDecision.APPROVED, confidence=1.0,
+                category="clean", flags=["empty_comment"],
+                reason="Đánh giá không kèm nhận xét (rating-only)", decided_by="prefilter",
+            )
+
         prefilter = run_prefilter(comment)
         if prefilter.rejected:
             return TextPipelineResult(
@@ -237,10 +267,11 @@ class ModerationOrchestrator:
         
         # Only log the LLM model version if it was processed by LLM (not local prefilter)
         text_model = self._settings.groq_model if (text_result.decided_by and text_result.decided_by.startswith("llm")) else None
+        text_reason = None if text_result.decision == ModerationDecision.APPROVED else text_result.reason
         await self._repo.insert_moderation_log(
             review_id=review.review_id, image_id=None, target_type="Text",
             action=_decision_to_action(text_result.decision),
-            reason=text_result.reason, moderation_result=text_result.raw_llm_result,
+            reason=text_reason, moderation_result=text_result.raw_llm_result,
             ai_model_version=text_model,
         )
         for image_id, img_result in image_results:
@@ -249,10 +280,11 @@ class ModerationOrchestrator:
             
             # Only log the vision model version if it was processed by Google Vision (not local prefilter)
             img_model = "google-vision-v1" if (img_result.decided_by and img_result.decided_by.startswith("vision")) else None
+            img_reason = None if img_result.decision == ModerationDecision.APPROVED else img_result.reason
             await self._repo.insert_moderation_log(
                 review_id=review.review_id, image_id=image_id, target_type="Image",
                 action=_decision_to_action(img_result.decision),
-                reason=img_result.reason, moderation_result=img_result.raw_vision_result,
+                reason=img_reason, moderation_result=img_result.raw_vision_result,
                 ai_model_version=img_model,
             )
 

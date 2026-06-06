@@ -22,7 +22,7 @@ class BlogContentGenerateResponse(BaseModel):
 
 class BlogContentBlockedResponse(BaseModel):
     status: Literal["blocked"] = "blocked"
-    violation_type: Literal["brand_external", "topic_restricted", "out_of_scope"]
+    violation_type: Literal["brand_external", "topic_restricted", "out_of_scope", "unsafe_content"]
     violated_keyword: str
     reason: str
     suggestions: list[str]

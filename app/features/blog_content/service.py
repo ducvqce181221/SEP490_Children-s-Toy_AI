@@ -4,16 +4,22 @@ import json
 import re
 import hashlib
 import unicodedata
+import time
 from pathlib import Path
 
 import httpx
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.utils.text_utils import has_hard_profanity
 
 MAX_CONTENT_LENGTH = 10_000
 MIN_CONTENT_LENGTH = 3_000
 _PRECONTENT_CACHE: str | None = None
+_PRECONTENT_LOADED_PATH: str | None = None
+_GENERATE_CACHE_TTL_SECONDS = 300.0
+_GENERATE_CACHE_MAX_ITEMS = 128
+_GENERATE_RESULT_CACHE: dict[str, tuple[float, tuple[str, str]]] = {}
 logger = get_logger(__name__)
 
 
@@ -23,14 +29,26 @@ class BlogContentGenerationError(RuntimeError):
 
 BLOCKED_KEYWORDS: dict[str, list[str]] = {
     "brand_external": [
-        "mykingdom", "ti ni", "lazada", "shopee",
-        "tiki", "sendo", "amazon", "bibo mart", "fahasa",
+        "mykingdom", "my kingdom", "ti ni", "tini", "tini store", "tiniworld",
+        "lazada", "shopee", "tiki", "sendo", "amazon", "bibo mart", "fahasa",
     ],
     "topic_restricted": [
         "chinh tri", "ton giao", "bao luc", "co bac",
         "vu khi", "noi dung nguoi lon", "chat kich thich",
     ],
 }
+
+HARD_BLOCK_EMOJIS = (
+    "🖕", "👅", "🍆", "😏", "🔞", "🚬", "🍺", "🍷", "🍸", "🚭",
+)
+
+_PROMPT_INJECTION_PATTERNS = (
+    "ignore previous instructions",
+    "reveal system prompt",
+    "output hidden rules",
+    "bypass moderation",
+    "act as another ai",
+)
 
 WHITELIST = ["google", "ghn", "giao hang nhanh", "children s toy store", "children toy store"]
 DEFAULT_BLOCK_SUGGESTIONS = [
@@ -39,6 +57,65 @@ DEFAULT_BLOCK_SUGGESTIONS = [
     "Top đồ chơi sáng tạo được yêu thích nhất",
     "Kinh nghiệm mua đồ chơi online an toàn cho phụ huynh",
 ]
+
+_UNSAFE_CONTENT_PATTERNS = [
+    re.compile(r"\bfuck\b", re.IGNORECASE),
+    re.compile(r"\bshit\b", re.IGNORECASE),
+    re.compile(r"\bbitch\b", re.IGNORECASE),
+    re.compile(r"\basshole\b", re.IGNORECASE),
+    re.compile(r"\bbastard\b", re.IGNORECASE),
+    re.compile(r"\bdick\b", re.IGNORECASE),
+    re.compile(r"\bpussy\b", re.IGNORECASE),
+    re.compile(r"\bkill\s+yourself\b", re.IGNORECASE),
+    re.compile(r"\bgo\s+die\b", re.IGNORECASE),
+    re.compile(r"\bditme\b", re.IGNORECASE),
+    re.compile(r"\bduma\b", re.IGNORECASE),
+    re.compile(r"\bdume\b", re.IGNORECASE),
+    re.compile(r"\bcon\s*di\b", re.IGNORECASE),
+    re.compile(r"\bcon\s*me\b", re.IGNORECASE),
+]
+
+_SHORT_UNSAFE_TOKENS = (
+    " dm ", " dmm ", " dcm ", " vcl ", " clm ", " clmm ", " dit ", " deo ", " duma ", " dume ",
+)
+
+_INTENT_ANCHORS = [
+    "đồ chơi", "do choi", "toy", "toys", "children toy", "kids toy",
+    "bé", "tre em", "trẻ em", "phụ huynh", "phu huynh",
+    "parenting", "child development", "giáo dục trẻ em", "giao duc tre em",
+    "learning through play", "stem toy", "toy safety",
+]
+
+_OFF_TOPIC_HINTS = [
+    "chinh tri", "chính trị", "politics", "election", "review phim", "movie review",
+    "nấu ăn", "nau an", "recipe", "crypto", "chung khoan", "stock market",
+]
+_INTENT_BLOCK_CONFIDENCE = 0.75
+_INTENT_PASS_CONFIDENCE = 0.55
+
+_ALLOWED_DOMAIN_ANCHORS = (
+    "toy", "toys", "children", "child", "kids", "kid", "parenting", "learning", "stem",
+    "gift", "review", "safety", "seasonal", "outdoor", "role play", "creativity",
+    "anatomy", "skeleton", "brain", "doctor", "halloween", "dinosaur", "monster", "fantasy",
+    "water gun", "water blaster", "foam blaster",
+)
+
+_BLOCKED_DOMAIN_HINTS = (
+    "politics", "election", "religion debate", "cryptocurrency", "crypto", "forex",
+    "stock trading", "gambling", "adult content", "dating", "relationship advice",
+    "medical treatment", "hacking", "crime", "weapon", "drug usage",
+)
+
+_UNSAFE_THEME_HINTS = (
+    "death", "dead body", "corpse", "human remains", "terrifying", "terror", "horror",
+    "gore", "gory", "bloody", "blood bath", "dismember", "decapitated", "violent scene",
+    "graphic", "nightmare", "fear inducing",
+)
+
+_EDUCATIONAL_SAFETY_CONTEXT = (
+    "educational", "education", "learning", "stem", "anatomy", "biology", "science",
+    "model", "toy", "toys", "children", "kids", "child development", "role play",
+)
 
 
 def _build_contextual_fallback_suggestions(title: str, content: str) -> list[str]:
@@ -65,32 +142,262 @@ def _build_contextual_fallback_suggestions(title: str, content: str) -> list[str
     ]
 
 
-def _normalize_for_check(value: str) -> str:
+def _has_vietnamese_diacritic(value: str) -> bool:
+    return bool(re.search(r"[ăâđêôơưáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]", (value or "").lower()))
+
+
+def _normalize_for_check(value: str, *, strip_diacritic: bool = True) -> str:
     lowered = (value or "").lower()
-    no_diacritic = "".join(
-        ch for ch in unicodedata.normalize("NFKD", lowered) if not unicodedata.combining(ch)
-    )
-    alpha_num_space = re.sub(r"[^a-z0-9\s]", " ", no_diacritic)
+    if strip_diacritic:
+        normalized = "".join(
+            ch for ch in unicodedata.normalize("NFKD", lowered) if not unicodedata.combining(ch)
+        )
+        alpha_num_space = re.sub(r"[^a-z0-9\s]", " ", normalized)
+    else:
+        alpha_num_space = re.sub(r"[^\w\s]", " ", lowered, flags=re.UNICODE)
     return re.sub(r"\s+", " ", alpha_num_space).strip()
 
 
-def pre_check(topic: str) -> dict[str, str | list[str]] | None:
-    normalized = f" {_normalize_for_check(topic)} "
-    for w in WHITELIST:
-        normalized = normalized.replace(f" {_normalize_for_check(w)} ", " ")
-    normalized = re.sub(r"\s+", " ", normalized).strip()
+def _build_deepseek_endpoints(base_url: str) -> list[str]:
+    base = (base_url or "https://api.deepseek.com").rstrip("/")
+    if base.endswith("/chat/completions"):
+        return [base]
+    if base.endswith("/v1"):
+        return [f"{base}/chat/completions"]
+    return [f"{base}/chat/completions", f"{base}/v1/chat/completions"]
 
-    for violation_type, keywords in BLOCKED_KEYWORDS.items():
-        for kw in keywords:
-            normalized_kw = _normalize_for_check(kw)
-            if f" {normalized_kw} " in f" {normalized} ":
-                return {
-                    "status": "blocked",
-                    "violation_type": violation_type,
-                    "violated_keyword": kw,
-                    "reason": f"Chủ đề đề cập đến '{kw}' không thuộc phạm vi Children's Toy Store.",
-                    "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
-                }
+
+def _make_generate_cache_key(
+    action: str,
+    title: str,
+    description: str | None,
+    prompt_structure: str,
+    tone: str,
+    category_id: int,
+    source_content: str | None,
+) -> str:
+    raw = "|".join([
+        action or "",
+        title or "",
+        description or "",
+        prompt_structure or "",
+        tone or "",
+        str(category_id),
+        source_content or "",
+    ])
+    return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _cache_get(key: str) -> tuple[str, str] | None:
+    now = time.monotonic()
+    cached = _GENERATE_RESULT_CACHE.get(key)
+    if not cached:
+        return None
+    ts, value = cached
+    if now - ts > _GENERATE_CACHE_TTL_SECONDS:
+        _GENERATE_RESULT_CACHE.pop(key, None)
+        return None
+    return value
+
+
+def _cache_put(key: str, value: tuple[str, str]) -> None:
+    now = time.monotonic()
+    if len(_GENERATE_RESULT_CACHE) >= _GENERATE_CACHE_MAX_ITEMS:
+        oldest_key = min(_GENERATE_RESULT_CACHE.items(), key=lambda item: item[1][0])[0]
+        _GENERATE_RESULT_CACHE.pop(oldest_key, None)
+    _GENERATE_RESULT_CACHE[key] = (now, value)
+
+
+def _contains_keyword(normalized_text: str, keyword: str) -> bool:
+    normalized_kw = _normalize_for_check(keyword, strip_diacritic=True)
+    if not normalized_kw:
+        return False
+    if len(normalized_kw) < 5:
+        return re.search(rf"\b{re.escape(normalized_kw)}\b", normalized_text, flags=re.IGNORECASE) is not None
+    return f" {normalized_kw} " in f" {normalized_text} "
+
+
+def _detect_external_brand(title: str, prompt_structure: str) -> str | None:
+    normalized = _normalize_for_check(_build_user_context(title, prompt_structure), strip_diacritic=True)
+    for keyword in BLOCKED_KEYWORDS["brand_external"]:
+        if _contains_keyword(normalized, keyword):
+            return keyword
+    return None
+
+
+def _build_user_context(title: str, prompt_structure: str) -> str:
+    return f"{title.strip()}\n{prompt_structure.strip()}".strip()
+
+
+def _check_hard_block_emoji(title: str, prompt_structure: str) -> str | None:
+    context = _build_user_context(title, prompt_structure)
+    for emoji in HARD_BLOCK_EMOJIS:
+        if emoji in context:
+            return emoji
+    return None
+
+
+def _detect_prompt_injection(title: str, prompt_structure: str) -> str | None:
+    normalized = _normalize_for_check(_build_user_context(title, prompt_structure), strip_diacritic=True)
+    for phrase in _PROMPT_INJECTION_PATTERNS:
+        if phrase in normalized:
+            return phrase
+    return None
+
+
+def _detect_contextual_unsafe_theme(title: str, prompt_structure: str) -> str | None:
+    normalized = _normalize_for_check(_build_user_context(title, prompt_structure), strip_diacritic=True)
+    unsafe_hits = [hint for hint in _UNSAFE_THEME_HINTS if hint in normalized]
+    if not unsafe_hits:
+        return None
+
+    edu_hits = [hint for hint in _EDUCATIONAL_SAFETY_CONTEXT if hint in normalized]
+    graphic_only_hits = [hint for hint in unsafe_hits if hint in {"human remains", "gore", "gory", "dismember", "decapitated", "graphic"}]
+
+    # Block when unsafe theme dominates or any graphic indicator appears.
+    if graphic_only_hits:
+        return graphic_only_hits[0]
+    if len(unsafe_hits) >= 2 and len(edu_hits) == 0:
+        return unsafe_hits[0]
+    if len(unsafe_hits) >= 3 and len(edu_hits) <= 1:
+        return unsafe_hits[0]
+    return None
+
+
+def safety_check(title: str, prompt_structure: str) -> dict[str, str | list[str]] | None:
+    context = _build_user_context(title, prompt_structure)
+    injection = _detect_prompt_injection(title, prompt_structure)
+    if injection:
+        return {
+            "status": "blocked",
+            "violation_type": "unsafe_content",
+            "violated_keyword": injection,
+            "reason": "prompt_injection",
+            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+        }
+
+    external_brand = _detect_external_brand(title, prompt_structure)
+    if external_brand:
+        return {
+            "status": "blocked",
+            "violation_type": "brand_external",
+            "violated_keyword": external_brand,
+            "reason": "external_brand",
+            "suggestions": _build_contextual_fallback_suggestions(title, prompt_structure)[:4],
+        }
+
+    contextual_unsafe = _detect_contextual_unsafe_theme(title, prompt_structure)
+    if contextual_unsafe:
+        return {
+            "status": "blocked",
+            "violation_type": "unsafe_content",
+            "violated_keyword": contextual_unsafe,
+            "reason": "unsafe_content",
+            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+        }
+
+    unsafe_match = _detect_unsafe_content(context)
+    if unsafe_match:
+        return {
+            "status": "blocked",
+            "violation_type": "unsafe_content",
+            "violated_keyword": unsafe_match,
+            "reason": "unsafe_content",
+            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+        }
+    return None
+
+
+def _detect_unsafe_content(text: str) -> str | None:
+    if has_hard_profanity(text):
+        return "hard_profanity"
+
+    is_vietnamese = _has_vietnamese_diacritic(text)
+    normalized = _normalize_for_check(text, strip_diacritic=not is_vietnamese)
+    tokenized = f" {normalized} "
+    for short_token in _SHORT_UNSAFE_TOKENS:
+        if short_token in tokenized:
+            return short_token.strip()
+
+    for pattern in _UNSAFE_CONTENT_PATTERNS:
+        match = pattern.search(normalized)
+        if match:
+            return match.group(0)
+    return None
+
+
+def _fallback_intent_classification(
+    title: str,
+    description: str | None,
+    prompt_structure: str,
+    category_id: int,
+) -> dict[str, str | bool | float]:
+    combined = _build_user_context(title, prompt_structure)
+    normalized = _normalize_for_check(combined, strip_diacritic=True)
+    if not normalized:
+        return {
+            "is_relevant": False,
+            "confidence": 0.95,
+            "reason": "off_topic",
+            "suggestion": "Hãy thêm ngữ cảnh về đồ chơi, phụ huynh hoặc phát triển trẻ em.",
+            "decision": "block",
+            "source": "heuristic",
+        }
+
+    anchor_hits = sum(1 for anchor in _ALLOWED_DOMAIN_ANCHORS if anchor in normalized)
+    off_topic_hits = sum(1 for hint in _BLOCKED_DOMAIN_HINTS if hint in normalized)
+    token_count = max(1, len(normalized.split()))
+    relevance_score = min(1.0, ((anchor_hits * 1.3) + (0.8 if category_id > 0 else 0.0)) / token_count)
+
+    if off_topic_hits > 0 and anchor_hits == 0:
+        return {
+            "is_relevant": False,
+            "confidence": 0.9,
+            "reason": "off_topic",
+            "suggestion": "Hãy chuyển prompt sang chủ đề toy store, ví dụ chọn đồ chơi theo độ tuổi hoặc toy safety.",
+            "decision": "block",
+            "source": "heuristic",
+        }
+
+    if relevance_score >= _INTENT_PASS_CONFIDENCE:
+        return {
+            "is_relevant": True,
+            "confidence": relevance_score,
+            "reason": "",
+            "suggestion": "",
+            "decision": "pass",
+            "source": "heuristic",
+        }
+
+    return {
+        "is_relevant": True,
+        "confidence": relevance_score,
+        "reason": "Intent chưa rõ hoàn toàn, cho phép đi tiếp để tránh block nhầm.",
+        "suggestion": "",
+        "decision": "review",
+        "source": "heuristic",
+    }
+
+
+async def classify_intent(
+    *,
+    title: str,
+    description: str | None,
+    prompt_structure: str,
+    category_id: int,
+) -> dict[str, str | bool | float]:
+    return _fallback_intent_classification(title, description, prompt_structure, category_id)
+
+
+def _build_source_content_warning(source_content: str | None) -> str | None:
+    if not source_content:
+        return None
+    source_violation = _detect_unsafe_content(source_content)
+    if source_violation:
+        return (
+            "Nguồn nội dung cũ có dấu hiệu từ ngữ nhạy cảm, hệ thống tiếp tục generate cho Improve mode "
+            f"và bỏ qua block từ sourceContent (matched: {source_violation})."
+        )
     return None
 
 
@@ -128,8 +435,7 @@ Trả về JSON theo đúng format, không thêm text nào khác:
         return contextual_fallback[:4]
 
     model = settings.blog_deepseek_model or "deepseek-chat"
-    base_url = (settings.blog_deepseek_base_url or "https://api.deepseek.com").rstrip("/")
-    endpoints = [f"{base_url}/chat/completions", f"{base_url}/v1/chat/completions"]
+    endpoints = _build_deepseek_endpoints(settings.blog_deepseek_base_url)
     headers = {
         "Authorization": f"Bearer {settings.blog_deepseek_api_key}",
         "Content-Type": "application/json",
@@ -169,23 +475,37 @@ Trả về JSON theo đúng format, không thêm text nào khác:
 
 
 def _load_precontent_rules() -> str:
-    global _PRECONTENT_CACHE
+    global _PRECONTENT_CACHE, _PRECONTENT_LOADED_PATH
     if _PRECONTENT_CACHE is not None:
         return _PRECONTENT_CACHE
 
-    precontent_path = Path(__file__).resolve().parents[1] / "moderation" / "text_pipeline" / "precontent.txt"
-    if not precontent_path.exists():
-        _PRECONTENT_CACHE = ""
-        return _PRECONTENT_CACHE
+    base_dir = Path(__file__).resolve().parents[1]
+    candidate_paths = [
+        base_dir / "moderation" / "product_review" / "text_pipeline" / "precontent.txt",
+        base_dir / "moderation" / "text_pipeline" / "precontent.txt",
+    ]
+    precontent_path = next((path for path in candidate_paths if path.exists()), None)
+    if precontent_path is None:
+        logger.error("Precontent rules file not found", candidate_paths=[str(path) for path in candidate_paths])
+        raise RuntimeError("Moderation rules failed to load: precontent.txt was not found.")
 
+    _PRECONTENT_LOADED_PATH = str(precontent_path)
     raw = precontent_path.read_bytes()
     for encoding in ("utf-8", "utf-8-sig", "cp1258", "latin-1"):
         try:
             _PRECONTENT_CACHE = raw.decode(encoding).strip()
+            if not _PRECONTENT_CACHE:
+                logger.error("Precontent rules loaded empty", path=_PRECONTENT_LOADED_PATH, encoding=encoding)
+                raise RuntimeError("Moderation rules failed to load: precontent.txt is empty.")
+            logger.info("Loaded precontent rules", path=_PRECONTENT_LOADED_PATH, encoding=encoding, chars=len(_PRECONTENT_CACHE))
             return _PRECONTENT_CACHE
         except UnicodeDecodeError:
             continue
     _PRECONTENT_CACHE = raw.decode("utf-8", errors="ignore").strip()
+    if not _PRECONTENT_CACHE:
+        logger.error("Precontent rules loaded empty after fallback decode", path=_PRECONTENT_LOADED_PATH)
+        raise RuntimeError("Moderation rules failed to load: precontent decode returned empty content.")
+    logger.info("Loaded precontent rules", path=_PRECONTENT_LOADED_PATH, encoding="utf-8-fallback", chars=len(_PRECONTENT_CACHE))
     return _PRECONTENT_CACHE
 
 
@@ -312,6 +632,22 @@ def _remove_prompt_leakage(content_html: str, prompt_structure: str) -> str:
         )
     cleaned = re.sub(r"<ul>\s*</ul>", "", cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
+
+
+def output_validation(content_html: str) -> tuple[str, str]:
+    cleaned = content_html
+    for emoji in HARD_BLOCK_EMOJIS:
+        cleaned = cleaned.replace(emoji, "")
+
+    unsafe_marker = _detect_unsafe_content(cleaned)
+    if unsafe_marker:
+        return "reject", unsafe_marker
+
+    normalized = _normalize_for_check(cleaned, strip_diacritic=True)
+    if any(marker in normalized for marker in ("hate", "racist", "ethnic cleansing")):
+        return "reject", "hate_content"
+
+    return "pass", cleaned
 
 
 
@@ -637,10 +973,58 @@ async def generate_blog_content(
         category_id=category_id,
     )
 
-    moderation_input = "\n".join(
-        [title or "", description or "", prompt_structure or "", source_content or ""]
+    # Step 1: Validate request (user scope only).
+    if not (title or "").strip() or not (prompt_structure or "").strip() or category_id <= 0:
+        return {
+            "status": "blocked",
+            "violation_type": "unsafe_content",
+            "violated_keyword": "validation_error",
+            "reason": "invalid_request",
+            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+        }
+
+    # Step 2: Emoji check (hard block list) on user scope only.
+    blocked_emoji = _check_hard_block_emoji(title, prompt_structure)
+    if blocked_emoji:
+        return {
+            "status": "blocked",
+            "violation_type": "unsafe_content",
+            "violated_keyword": blocked_emoji,
+            "reason": "inappropriate_emoji",
+            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+        }
+
+    # Step 3: classify_intent() on user scope only.
+    intent = await classify_intent(
+        title=title,
+        description=description,
+        prompt_structure=prompt_structure,
+        category_id=category_id,
     )
-    violation = pre_check(moderation_input)
+    if str(intent.get("decision")) == "block":
+        logger.info(
+            "Blog generation blocked by intent gate",
+            reason=intent.get("reason"),
+            confidence=intent.get("confidence"),
+            source=intent.get("source"),
+        )
+        return {
+            "status": "blocked",
+            "violation_type": "out_of_scope",
+            "violated_keyword": "off_topic",
+            "reason": "off_topic",
+            "suggestions": [str(intent.get("suggestion", DEFAULT_BLOCK_SUGGESTIONS[0]))] + DEFAULT_BLOCK_SUGGESTIONS[:3],
+        }
+    if str(intent.get("decision")) == "review":
+        logger.info(
+            "Intent gate uncertain, allow generation",
+            reason=intent.get("reason"),
+            confidence=intent.get("confidence"),
+            source=intent.get("source"),
+        )
+
+    # Step 4: safety_check() on user scope only.
+    violation = safety_check(title=title, prompt_structure=prompt_structure)
     if violation:
         smart_suggestions = await generate_smart_suggestions(
             title=title,
@@ -656,13 +1040,31 @@ async def generate_blog_content(
         )
         return violation
 
+    # SourceContent is system scope and never causes blocking.
+    source_warning = _build_source_content_warning(source_content)
+    if source_warning:
+        logger.warning("Source content moderation warning", detail=source_warning)
+
+    cache_key = _make_generate_cache_key(
+        action=action,
+        title=title,
+        description=description,
+        prompt_structure=prompt_structure,
+        tone=tone,
+        category_id=category_id,
+        source_content=source_content,
+    )
+    cached_result = _cache_get(cache_key)
+    if cached_result is not None:
+        logger.info("AI blog generation cache hit", title_len=len(title or ""))
+        return cached_result
+
     settings = get_settings()
     if not settings.blog_deepseek_api_key:
         raise BlogContentGenerationError("DEEPSEEK_API_KEY is not configured.")
 
     model = settings.blog_deepseek_model or "deepseek-chat"
-    base_url = (settings.blog_deepseek_base_url or "https://api.deepseek.com").rstrip("/")
-    endpoints = [f"{base_url}/chat/completions", f"{base_url}/v1/chat/completions"]
+    endpoints = _build_deepseek_endpoints(settings.blog_deepseek_base_url)
 
     strategy = _build_dynamic_writing_strategy(
         title=title,
@@ -671,16 +1073,14 @@ async def generate_blog_content(
         tone=tone,
     )
 
+    # Step 5: build_prompt().
     system_prompt = (
-        "You are an expert multilingual blog writer for a children's toy e-commerce website. "
-        "You must understand both Vietnamese and English input. "
-        "Output must always be in professional, natural, SEO-friendly English. "
-        "If input is Vietnamese, preserve the original meaning and generate an English article. "
-        "If input is English, generate English as usual. "
-        "Content must be safe, family-friendly, and relevant only to children's toys, parenting, and child development. "
-        "Avoid generic reusable templates and avoid repeating sentence patterns across requests. "
-        "Each article must be highly specific to the provided prompt intent. "
-        "Do not repeat input metadata or prompt fields."
+        "You are a senior blog writer for a children's toy e-commerce website. "
+        "Understand Vietnamese and English input, but always output natural SEO-friendly English. "
+        "Keep content family-safe and specific to toys, parenting, and child development. "
+        "Write strictly about the user-provided topic and intent. "
+        "Do not rewrite, redirect, or reinterpret off-topic requests into toy-store content. "
+        "Avoid template-like phrasing and do not echo request metadata."
     )
     precontent_rules = _load_precontent_rules()
     user_prompt = f"""
@@ -699,30 +1099,15 @@ DynamicWritingStrategy:
 - CTA style: {strategy['cta_style']}
 - CTA message intent: {strategy['topic_cta']}
 
-Create a complete blog article with opening, body, and conclusion.
-Use natural language, practical guidance, and coherent flow.
-Length requirement: content must be between 3000 and 6000 characters.
-Structure requirement:
-- One opening section
-- At least 3 body sections with clear subheadings
-- One conclusion section
-IMPORTANT:
-- Do NOT output title or description inside content body.
-- Do NOT output labels/phrases like "Mo bai", "Than bai", "Ket bai" (or Vietnamese accented variants).
-- Write continuous natural blog sections only.
-- Multilingual behavior:
-  - Understand both Vietnamese and English input.
-  - Always produce title and content in English.
-  - If input is Vietnamese, translate and optimize title to professional SEO English while preserving original intent.
-  - If input is English, keep normal English generation.
-- Content uniqueness:
-  - Use a distinct opening approach for this request.
-  - Use unique section headings tied to this exact prompt topic.
-  - Avoid repeating fixed phrases such as "This article helps parents choose safe..." unless context explicitly requires it.
-  - Avoid reusing the same structure as previous requests; follow DynamicWritingStrategy.
-Return ONLY valid JSON (no markdown, no explanation) with keys: title, content.
-The content value must be HTML (<h1>, <h2>, <h3>, <p>, <ul>, <li>, <strong>, <blockquote>) and <= 10000 characters.
-Use rich formatting naturally: headings, bullet lists, highlighted key points, quote blocks, and readable spacing.
+Write one complete article with opening, body, and conclusion.
+Constraints:
+- 3000-6000 characters, continuous natural prose.
+- Opening + at least 3 body sections with unique subheadings + conclusion.
+- Do NOT include request metadata or labels like "Mo bai/Than bai/Ket bai".
+- Always return English title and content (translate intent if Vietnamese input).
+- Keep wording varied and specific to this prompt topic.
+- Return ONLY valid JSON: {{"title":"...","content":"..."}}.
+- content must be HTML and <=10000 chars using <h1>, <h2>, <h3>, <p>, <ul>, <li>, <strong>, <blockquote>.
 
 Precontent rules (must comply):
 {precontent_rules}
@@ -747,110 +1132,124 @@ Precontent rules (must comply):
     per_request_timeout = settings.blog_deepseek_timeout_seconds
     retry_attempts = settings.blog_deepseek_retry_attempts
 
-    for endpoint in endpoints:
-        for attempt in range(retry_attempts):
-            payload = dict(payload_base)
-            if attempt > 0:
-                payload["messages"] = [
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": user_prompt
-                        + "\nIMPORTANT RETRY: Expand depth. Ensure 3000-6000 characters, opening-body-conclusion, and no metadata echo.",
-                    },
-                ]
+    # Step 6: call_model().
+    async with httpx.AsyncClient(timeout=per_request_timeout) as client:
+        for endpoint in endpoints:
+            for attempt in range(retry_attempts):
+                payload = dict(payload_base)
+                if attempt > 0:
+                    payload["messages"] = [
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": user_prompt
+                            + "\nIMPORTANT RETRY: Expand depth. Ensure 3000-6000 characters, opening-body-conclusion, and no metadata echo.",
+                        },
+                    ]
 
-            try:
-                logger.info("Calling DeepSeek", endpoint=endpoint, attempt=attempt + 1)
-                async with httpx.AsyncClient(timeout=per_request_timeout) as client:
+                try:
+                    logger.info("Calling DeepSeek", endpoint=endpoint, attempt=attempt + 1)
                     resp = await client.post(endpoint, json=payload, headers=headers)
-            except httpx.TimeoutException:
-                last_error = "DeepSeek request timeout."
-                logger.warning("DeepSeek timeout", endpoint=endpoint, attempt=attempt + 1)
-                continue
-            except httpx.HTTPError as ex:
-                last_error = f"DeepSeek request error: {ex}"
-                logger.warning("DeepSeek HTTP error", endpoint=endpoint, attempt=attempt + 1, error=str(ex))
-                continue
+                except httpx.TimeoutException:
+                    last_error = "DeepSeek request timeout."
+                    logger.warning("DeepSeek timeout", endpoint=endpoint, attempt=attempt + 1)
+                    continue
+                except httpx.HTTPError as ex:
+                    last_error = f"DeepSeek request error: {ex}"
+                    logger.warning("DeepSeek HTTP error", endpoint=endpoint, attempt=attempt + 1, error=str(ex))
+                    continue
 
-            if resp.status_code == 404:
-                last_error = "DeepSeek endpoint not found."
-                logger.warning("DeepSeek endpoint not found", endpoint=endpoint)
-                break
-            if resp.status_code >= 400:
-                last_error = f"DeepSeek returned HTTP {resp.status_code}."
-                logger.warning(
-                    "DeepSeek non-success response",
-                    endpoint=endpoint,
-                    attempt=attempt + 1,
-                    status=resp.status_code,
-                    body_preview=resp.text[:300],
-                )
-                continue
-
-            try:
-                outer = resp.json()
-                content = outer["choices"][0]["message"]["content"]
-                if not content:
-                    raise ValueError("empty content")
-
-                parsed_title, parsed_content = _try_parse_json_payload(content)
-                generated_title = _ensure_rewritten_english_title(
-                    parsed_title,
-                    title,
-                    description,
-                    prompt_structure,
-                )
-                blog_content = (parsed_content or "").strip()
-
-                if not blog_content:
-                    fallback_text = _strip_json_prefix_noise(_clean_model_text(content))
-                    if not fallback_text:
-                        raise ValueError("empty blogContent")
-                    blog_content = fallback_text
-
-                blog_content = _to_html_from_text(blog_content)
-                if not blog_content:
-                    blog_content = _build_structured_fallback_html(
-                        title=generated_title,
-                        description=description,
-                        prompt_structure=prompt_structure,
-                        tone=tone,
+                if resp.status_code == 404:
+                    last_error = "DeepSeek endpoint not found."
+                    logger.warning("DeepSeek endpoint not found", endpoint=endpoint)
+                    break
+                if resp.status_code >= 400:
+                    last_error = f"DeepSeek returned HTTP {resp.status_code}."
+                    logger.warning(
+                        "DeepSeek non-success response",
+                        endpoint=endpoint,
+                        attempt=attempt + 1,
+                        status=resp.status_code,
+                        body_preview=resp.text[:300],
                     )
+                    continue
 
-                if _is_low_quality_or_echo(blog_content):
-                    if attempt < (retry_attempts - 1):
-                        continue
-                    blog_content = _build_structured_fallback_html(
-                        title=generated_title,
-                        description=description,
-                        prompt_structure=prompt_structure,
-                        tone=tone,
-                    )
+                try:
+                    outer = resp.json()
+                    content = outer["choices"][0]["message"]["content"]
+                    if not content:
+                        raise ValueError("empty content")
 
-                if len(blog_content) > MAX_CONTENT_LENGTH:
-                    blog_content = blog_content[:MAX_CONTENT_LENGTH]
-                blog_content = _remove_forbidden_markers(blog_content, generated_title)
-                blog_content = _remove_prompt_leakage(blog_content, prompt_structure)
-                logger.info(
-                    "AI blog generation succeeded",
-                    endpoint=endpoint,
-                    attempt=attempt + 1,
-                    output_title_len=len(generated_title),
-                    output_content_len=len(blog_content),
-                )
-                if _contains_vietnamese_signals(blog_content):
-                    blog_content = _build_structured_fallback_html(
-                        title=generated_title,
-                        description=description,
-                        prompt_structure=prompt_structure,
-                        tone=tone,
+                    parsed_title, parsed_content = _try_parse_json_payload(content)
+                    generated_title = _ensure_rewritten_english_title(
+                        parsed_title,
+                        title,
+                        description,
+                        prompt_structure,
                     )
-                return generated_title, blog_content
-            except (KeyError, ValueError, TypeError, json.JSONDecodeError):
-                last_error = "DeepSeek response parse failed."
-                logger.warning("DeepSeek parse failed", endpoint=endpoint, attempt=attempt + 1)
-                continue
+                    blog_content = (parsed_content or "").strip()
+
+                    if not blog_content:
+                        fallback_text = _strip_json_prefix_noise(_clean_model_text(content))
+                        if not fallback_text:
+                            raise ValueError("empty blogContent")
+                        blog_content = fallback_text
+
+                    blog_content = _to_html_from_text(blog_content)
+                    if not blog_content:
+                        blog_content = _build_structured_fallback_html(
+                            title=generated_title,
+                            description=description,
+                            prompt_structure=prompt_structure,
+                            tone=tone,
+                        )
+
+                    if _is_low_quality_or_echo(blog_content):
+                        if attempt < (retry_attempts - 1):
+                            continue
+                        blog_content = _build_structured_fallback_html(
+                            title=generated_title,
+                            description=description,
+                            prompt_structure=prompt_structure,
+                            tone=tone,
+                        )
+
+                    if len(blog_content) > MAX_CONTENT_LENGTH:
+                        blog_content = blog_content[:MAX_CONTENT_LENGTH]
+                    blog_content = _remove_forbidden_markers(blog_content, generated_title)
+                    blog_content = _remove_prompt_leakage(blog_content, prompt_structure)
+                    logger.info(
+                        "AI blog generation succeeded",
+                        endpoint=endpoint,
+                        attempt=attempt + 1,
+                        output_title_len=len(generated_title),
+                        output_content_len=len(blog_content),
+                    )
+                    if _contains_vietnamese_signals(blog_content):
+                        blog_content = _build_structured_fallback_html(
+                            title=generated_title,
+                            description=description,
+                            prompt_structure=prompt_structure,
+                            tone=tone,
+                        )
+                    # Step 7: output_validation().
+                    validation_status, validation_payload = output_validation(blog_content)
+                    if validation_status == "reject":
+                        return {
+                            "status": "blocked",
+                            "violation_type": "unsafe_content",
+                            "violated_keyword": str(validation_payload),
+                            "reason": "unsafe_output",
+                            "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+                        }
+
+                    result = (generated_title, validation_payload)
+                    _cache_put(cache_key, result)
+                    return result
+                except (KeyError, ValueError, TypeError, json.JSONDecodeError):
+                    last_error = "DeepSeek response parse failed."
+                    logger.warning("DeepSeek parse failed", endpoint=endpoint, attempt=attempt + 1)
+                    continue
 
     fallback_title = _ensure_rewritten_english_title(
         None,
@@ -868,12 +1267,23 @@ Precontent rules (must comply):
         fallback_html = fallback_html[:MAX_CONTENT_LENGTH]
     fallback_html = _remove_prompt_leakage(fallback_html, prompt_structure)
     if fallback_html:
+        validation_status, validation_payload = output_validation(fallback_html)
+        if validation_status == "reject":
+            return {
+                "status": "blocked",
+                "violation_type": "unsafe_content",
+                "violated_keyword": str(validation_payload),
+                "reason": "unsafe_output",
+                "suggestions": DEFAULT_BLOCK_SUGGESTIONS[:4],
+            }
         logger.warning(
             "Using fallback blog content after AI failure",
             reason=last_error,
             output_len=len(fallback_html),
         )
-        return fallback_title, fallback_html
+        result = (fallback_title, validation_payload)
+        _cache_put(cache_key, result)
+        return result
     raise BlogContentGenerationError(last_error)
 
 
