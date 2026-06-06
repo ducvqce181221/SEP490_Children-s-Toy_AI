@@ -75,7 +75,9 @@ def _build_obfuscated_word_pattern(word: str) -> re.Pattern[str]:
 
 def _build_obfuscated_phrase_pattern(*words: str) -> re.Pattern[str]:
     parts = [r"[\W_]*".join(re.escape(ch) for ch in word) for word in words]
-    return re.compile(rf"(?<![a-z0-9]){r'[\W_]+'.join(parts)}(?![a-z0-9])", re.IGNORECASE)
+    separator = r"[\W_]+"
+    phrase = separator.join(parts)
+    return re.compile(rf"(?<![a-z0-9]){phrase}(?![a-z0-9])", re.IGNORECASE)
 
 
 _OBFUSCATED_PHRASE_REGEX = [
