@@ -13,6 +13,7 @@ _RAW_HARD_PROFANITY_WORDS = (
     "khốn nạn",
     "mất dạy",
     "rác rưởi",
+    "cức",
 )
 
 _LEET_MAP = str.maketrans({
@@ -53,6 +54,8 @@ _HARD_PROFANITY_PATTERNS = (
     r"\bdmm\b",
     r"\bclm\b",
     r"\bclmm\b",
+    r"\bcuc\b",
+    r"\bcuk\b",
 )
 
 _HARD_PROFANITY_REGEX = [re.compile(p, re.IGNORECASE) for p in _HARD_PROFANITY_PATTERNS]
@@ -65,6 +68,8 @@ _OBFUSCATED_TERMS = (
     "dit",
     "djt",
     "deo",
+    "cuc",
+    "cuk",
 )
 
 def _build_obfuscated_word_pattern(word: str) -> re.Pattern[str]:
@@ -75,9 +80,8 @@ def _build_obfuscated_word_pattern(word: str) -> re.Pattern[str]:
 
 def _build_obfuscated_phrase_pattern(*words: str) -> re.Pattern[str]:
     parts = [r"[\W_]*".join(re.escape(ch) for ch in word) for word in words]
-    separator = r"[\W_]+"
-    phrase = separator.join(parts)
-    return re.compile(rf"(?<![a-z0-9]){phrase}(?![a-z0-9])", re.IGNORECASE)
+    pattern_str = r"[\W_]+".join(parts)
+    return re.compile(rf"(?<![a-z0-9]){pattern_str}(?![a-z0-9])", re.IGNORECASE)
 
 
 _OBFUSCATED_PHRASE_REGEX = [

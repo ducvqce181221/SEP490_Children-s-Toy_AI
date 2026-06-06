@@ -33,7 +33,13 @@ TOY_KEYWORDS = {
     "educational", "toddler", "children", "playful",
     # Costume & Character Pretend Play categories
     "mask", "masque", "costume", "mascot", "fictional character", "superhero",
-    "cosplay", "pretend play", "roleplay", "character", "action figure", "merchandise"
+    "cosplay", "pretend play", "roleplay", "character", "action figure", "merchandise",
+    # Product & Packaging terms to prevent false positives on toy boxes
+    "product", "packaged product", "box", "packaging", "gift", "carton", "cardboard box",
+    # Physical toy material & vehicle terms
+    "plastic", "wooden", "wood", "fabric", "textile", "miniature", "model", "scale model",
+    "vehicle", "car", "train", "airplane", "truck", "motorcycle", "figurine", "collectible",
+    "novelty", "hobby", "recreation"
 }
 
 REAL_WEAPON_LABELS = {

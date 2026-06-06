@@ -112,10 +112,10 @@ class Settings(BaseSettings):
 
     # ── Image thresholds ─────────────────────────────────────────────────
     image_min_size_kb: int = Field(default=10, gt=0)
-    image_max_size_mb: int = Field(default=10, gt=0)
+    image_max_size_mb: int = Field(default=5, gt=0)
     image_blur_lv_reject_threshold: float = Field(default=1.0, gt=0)
     image_phash_hamming_distance: int = Field(default=10, ge=0)
-    image_phash_duplicate_min_reviews: int = Field(default=5, ge=1)
+    image_phash_duplicate_min_reviews: int = Field(default=2, ge=1)
 
     # ── Business rules ───────────────────────────────────────────────────
     account_rejected_review_days: int = Field(default=30, gt=0)

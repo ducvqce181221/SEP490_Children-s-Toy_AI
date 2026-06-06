@@ -22,6 +22,8 @@ def test_has_hard_profanity_blocks_real_cases() -> None:
     assert has_hard_profanity("c-o-n c-ạ-c")
     assert has_hard_profanity("con cko's")
     assert has_hard_profanity("kac")
+    assert has_hard_profanity("vãi cả cức")
+    assert has_hard_profanity("v~ cả cứk")
 
     # Mild slang / ambiguous words are NOT strictly blocked by pre-filter (processed by LLM instead)
     assert not has_hard_profanity("cl")
