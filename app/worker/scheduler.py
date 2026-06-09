@@ -9,7 +9,7 @@ from __future__ import annotations
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app.core.config import get_settings
+from app.configs.config import get_settings
 from app.core.logging import get_logger
 from app.worker.product_review_worker import run_moderation_batch
 

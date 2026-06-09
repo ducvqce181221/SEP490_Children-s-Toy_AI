@@ -15,7 +15,7 @@ os.environ.setdefault("GROQ_API_KEY", "gsk_test_key")
 os.environ.setdefault("INTERNAL_API_KEY", "test-internal-key")
 
 
-from app.core.config import get_settings  # noqa: E402 — must be after env setup
+from app.configs.config import get_settings  # noqa: E402 — must be after env setup
 
 
 @pytest.fixture(scope="session")

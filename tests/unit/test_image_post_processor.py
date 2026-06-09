@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.features.moderation.product_review.image_pipeline.post_processor import apply_vision_results
-from app.features.moderation.product_review.image_pipeline.prefilter import PrefilterImageResult
-from app.features.moderation.product_review.image_pipeline.vision_client import VisionAnalysisResult
-from app.features.moderation.schemas import ModerationDecision
+from app.application.moderation.image_pipeline import apply_vision_results, PrefilterImageResult
+from app.integrations.google_vision import VisionAnalysisResult
+from app.schemas.moderation import ModerationDecision
 
 
 def test_safesearch_hard_violation_rejected():
@@ -43,7 +42,7 @@ def test_ocr_url_rejected():
     result = apply_vision_results(pre_res, vis_res)
     assert result.decision == ModerationDecision.REJECTED
     assert "vision_text_violation" in result.flags
-    assert "Chứa URL hoặc link rút gọn" in result.reason
+    assert "Contains URL or shortened link" in result.reason
 
 
 def test_ocr_phone_rejected():
@@ -59,7 +58,7 @@ def test_ocr_phone_rejected():
     result = apply_vision_results(pre_res, vis_res)
     assert result.decision == ModerationDecision.REJECTED
     assert "vision_text_violation" in result.flags
-    assert "Chứa số điện thoại Việt Nam" in result.reason
+    assert "Contains Vietnamese phone number" in result.reason
 
 
 def test_ocr_bank_rejected():
@@ -75,7 +74,7 @@ def test_ocr_bank_rejected():
     result = apply_vision_results(pre_res, vis_res)
     assert result.decision == ModerationDecision.REJECTED
     assert "vision_text_violation" in result.flags
-    assert "Chứa dãy số nghi là số tài khoản ngân hàng" in result.reason
+    assert "Contains bank-account-like number sequence" in result.reason
 
 
 def test_no_toy_label_rejected():
@@ -122,7 +121,7 @@ def test_ocr_profanity_rejected():
     result = apply_vision_results(pre_res, vis_res)
     assert result.decision == ModerationDecision.REJECTED
     assert "vision_profanity_violation" in result.flags
-    assert "từ ngữ thô tục" in result.reason
+    assert "profanity" in result.reason
 
 
 def test_ocr_obfuscated_phone_rejected():
@@ -138,7 +137,7 @@ def test_ocr_obfuscated_phone_rejected():
     result = apply_vision_results(pre_res, vis_res)
     assert result.decision == ModerationDecision.REJECTED
     assert "vision_text_violation" in result.flags
-    assert "Chứa số điện thoại Việt Nam" in result.reason
+    assert "Contains Vietnamese phone number" in result.reason
 
 
 def test_ocr_obfuscated_profanity_rejected():
@@ -154,4 +153,4 @@ def test_ocr_obfuscated_profanity_rejected():
     result = apply_vision_results(pre_res, vis_res)
     assert result.decision == ModerationDecision.REJECTED
     assert "vision_profanity_violation" in result.flags
-    assert "từ ngữ thô tục" in result.reason
+    assert "profanity" in result.reason
