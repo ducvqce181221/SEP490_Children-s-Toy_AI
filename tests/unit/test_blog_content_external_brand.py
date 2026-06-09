@@ -5,8 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.features.blog_content import service
-from app.features.blog_content.service import generate_blog_content, safety_check
+from app.application.blog_generation import service
+from app.application.blog_generation.service import generate_blog_content
+from app.ai.engines.content_analyzer import safety_check
 
 
 def test_safety_check_blocks_external_brand_variants() -> None:
@@ -79,8 +80,11 @@ async def test_generate_does_not_block_external_brand_in_source_content(monkeypa
         blog_deepseek_retry_attempts=1,
     )
 
-    monkeypatch.setattr(service, "get_settings", lambda: fake_settings)
-    monkeypatch.setattr(service.httpx, "AsyncClient", FakeAsyncClient)
+    import app.configs.config
+    import app.ai.providers.deepseek
+
+    monkeypatch.setattr(app.configs.config, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(app.ai.providers.deepseek.httpx, "AsyncClient", FakeAsyncClient)
     service._GENERATE_RESULT_CACHE.clear()
 
     title, content = await generate_blog_content(

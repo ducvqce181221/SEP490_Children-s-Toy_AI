@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.features.blog_content.service import _detect_unsafe_content
+from app.ai.engines.content_analyzer import _detect_unsafe_content
 
 
 def test_detect_unsafe_content_blocks_real_profanity() -> None:

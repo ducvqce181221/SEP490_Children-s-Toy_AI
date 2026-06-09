@@ -10,8 +10,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.features.moderation.schemas import ModerationDecision, TextPipelineResult
-from app.features.moderation.product_review.text_pipeline.post_processor import (
+from app.schemas.moderation import ModerationDecision, TextPipelineResult
+from app.application.moderation.business_rules import (
     PostProcessContext,
     apply_business_rules,
 )
@@ -73,7 +73,7 @@ class TestApplyBusinessRules:
         assert out.decision == ModerationDecision.REJECTED
 
     def test_repeat_offender_escalates_approved(self):
-        from app.core.config import get_settings
+        from app.configs.config import get_settings
         settings = get_settings()
         result = _make_result(confidence=0.90)
         ctx = PostProcessContext(
@@ -85,7 +85,7 @@ class TestApplyBusinessRules:
         assert any("repeat_offender" in f for f in out.flags)
 
     def test_one_rejection_not_escalated(self):
-        from app.core.config import get_settings
+        from app.configs.config import get_settings
         settings = get_settings()
         result = _make_result(confidence=0.90)
         ctx = PostProcessContext(

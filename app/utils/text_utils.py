@@ -251,3 +251,99 @@ def has_hard_profanity(text: str | None) -> bool:
         return True
 
     return False
+
+
+def split_graphemes(text: str) -> list[str]:
+    """
+    Split a string into visual grapheme clusters, grouping base characters
+    with variation selectors, zero-width joiners, emoji modifiers, and diacritics.
+    """
+    graphemes = []
+    if not text:
+        return graphemes
+    
+    current_grapheme = []
+    for ch in text:
+        code = ord(ch)
+        if (0xFE00 <= code <= 0xFE0F or
+            0x1F3FB <= code <= 0x1F3FF or
+            code == 0x200D or
+            code == 0x20E3 or
+            unicodedata.combining(ch)):
+            if current_grapheme:
+                current_grapheme.append(ch)
+            else:
+                current_grapheme = [ch]
+        else:
+            if current_grapheme and current_grapheme[-1] == '\u200d':
+                current_grapheme.append(ch)
+            else:
+                if current_grapheme:
+                    graphemes.append("".join(current_grapheme))
+                current_grapheme = [ch]
+                
+    if current_grapheme:
+        graphemes.append("".join(current_grapheme))
+        
+    return graphemes
+
+
+def is_emoji_grapheme(g: str) -> bool:
+    """
+    Determine if a grapheme cluster represents an emoji.
+    """
+    if not g:
+        return False
+    code = ord(g[0])
+    if (0x1F300 <= code <= 0x1F9FF or
+        0x1FA00 <= code <= 0x1FAFF or
+        0x2600 <= code <= 0x27BF or
+        0x1F000 <= code <= 0x1F0FF or
+        0x1F100 <= code <= 0x1F2FF or
+        0x1F680 <= code <= 0x1F6FF):
+        return True
+    cat = unicodedata.category(g[0])
+    return cat in ("So", "Cn") and code > 0x7F
+
+
+def analyze_and_sanitize_text(text: str) -> tuple[str, bool, str | None]:
+    """
+    Analyzes review/comment text for emoji and character spam.
+    Returns:
+        - normalized_text (str): text with consecutive repetitions collapsed to 3.
+        - rejected (bool): True if the text violates safety thresholds.
+        - reason (str | None): failure description if rejected.
+    """
+    graphemes = split_graphemes(text)
+    if not graphemes:
+        return text, False, None
+    
+    max_consecutive_allowed = 5
+    max_consecutive_for_normalization = 3
+    
+    normalized_graphemes = []
+    current_g = ""
+    current_count = 0
+    
+    for g in graphemes:
+        if g == current_g:
+            current_count += 1
+            if current_count > max_consecutive_allowed:
+                is_emoji = is_emoji_grapheme(g)
+                spam_type = "emoji" if is_emoji else "character"
+                return text, True, f"Excessive consecutive {spam_type} repetition (more than {max_consecutive_allowed} times)"
+            
+            if current_count <= max_consecutive_for_normalization:
+                normalized_graphemes.append(g)
+        else:
+            current_g = g
+            current_count = 1
+            normalized_graphemes.append(g)
+            
+    total_emojis = sum(1 for g in normalized_graphemes if is_emoji_grapheme(g))
+    max_total_emojis = 10
+    if total_emojis > max_total_emojis:
+        return text, True, f"Review contains excessive emoji spam (more than {max_total_emojis} emojis)"
+        
+    return "".join(normalized_graphemes), False, None
+

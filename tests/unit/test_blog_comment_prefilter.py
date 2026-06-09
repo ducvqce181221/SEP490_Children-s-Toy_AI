@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.features.moderation.blog_comment.prefilter import run_blog_comment_prefilter
+from app.ai.engines.content_analyzer import run_blog_comment_prefilter
 
 
 class TestBlogCommentPrefilter:
