@@ -11,8 +11,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from app.features.moderation.product_review.image_pipeline.prefilter import run_image_prefilter
-from app.features.moderation.schemas import ModerationDecision
+from app.application.moderation.image_pipeline import run_image_prefilter
+from app.schemas.moderation import ModerationDecision
 
 
 def _make_image(color: tuple, size: tuple = (200, 200)) -> Image.Image:

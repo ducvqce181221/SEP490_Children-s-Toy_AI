@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.features.moderation.blog_comment.service import BlogCommentModerationService
+from app.application.moderation.blog_comment import BlogCommentModerationService
 
 
 class TestBlogCommentPrivacyOverride:

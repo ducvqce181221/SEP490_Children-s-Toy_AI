@@ -12,10 +12,10 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from app.core.config import get_settings
-from app.core.database import close_db_pool, init_db_pool
+from app.configs.config import get_settings
+from app.database.connection import close_db_pool, init_db_pool
 from app.core.logging import get_logger, setup_logging
-from app.features.moderation.api import router as moderation_router
+from app.api.router import router as moderation_router
 from app.worker.scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
@@ -65,5 +65,5 @@ async def health_check() -> JSONResponse:
 
 if __name__ == "__main__":
     import uvicorn
-    # Lưu ý: dùng "app.main:app" thay vì "main:app" để uvicorn hiểu đúng cấu trúc package
+    # Note: use "app.main:app" instead of "main:app" for uvicorn to resolve package structure correctly
     uvicorn.run("app.main:app", host="0.0.0.0", port=8001, reload=True)

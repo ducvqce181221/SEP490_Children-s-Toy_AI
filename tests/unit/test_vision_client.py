@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
-from app.features.moderation.product_review.image_pipeline.vision_client import GoogleVisionClient
+from app.integrations.google_vision import GoogleVisionClient
 
 
-@patch("app.features.moderation.product_review.image_pipeline.vision_client.vision.ImageAnnotatorClient")
+@patch("app.integrations.google_vision.vision.ImageAnnotatorClient")
 def test_parse_response_suspicious_labels(mock_client):
     client = GoogleVisionClient()
     response = MagicMock()
@@ -35,7 +35,7 @@ def test_parse_response_suspicious_labels(mock_client):
     assert "street fighting" in result.violation_reason
 
 
-@patch("app.features.moderation.product_review.image_pipeline.vision_client.vision.ImageAnnotatorClient")
+@patch("app.integrations.google_vision.vision.ImageAnnotatorClient")
 def test_parse_response_clean_labels(mock_client):
     client = GoogleVisionClient()
     response = MagicMock()
@@ -59,7 +59,7 @@ def test_parse_response_clean_labels(mock_client):
     assert result.toy_label_found is True
 
 
-@patch("app.features.moderation.product_review.image_pipeline.vision_client.vision.ImageAnnotatorClient")
+@patch("app.integrations.google_vision.vision.ImageAnnotatorClient")
 def test_parse_response_toy_gun_allowed(mock_client):
     client = GoogleVisionClient()
     response = MagicMock()
@@ -87,7 +87,7 @@ def test_parse_response_toy_gun_allowed(mock_client):
     assert result.toy_label_found is True
 
 
-@patch("app.features.moderation.product_review.image_pipeline.vision_client.vision.ImageAnnotatorClient")
+@patch("app.integrations.google_vision.vision.ImageAnnotatorClient")
 def test_parse_response_water_gun_allowed(mock_client):
     client = GoogleVisionClient()
     response = MagicMock()
@@ -115,7 +115,7 @@ def test_parse_response_water_gun_allowed(mock_client):
     assert result.toy_label_found is True
 
 
-@patch("app.features.moderation.product_review.image_pipeline.vision_client.vision.ImageAnnotatorClient")
+@patch("app.integrations.google_vision.vision.ImageAnnotatorClient")
 def test_parse_response_real_handgun_rejected(mock_client):
     client = GoogleVisionClient()
     response = MagicMock()
@@ -139,7 +139,7 @@ def test_parse_response_real_handgun_rejected(mock_client):
     assert "real weapon detected" in result.violation_reason
 
 
-@patch("app.features.moderation.product_review.image_pipeline.vision_client.vision.ImageAnnotatorClient")
+@patch("app.integrations.google_vision.vision.ImageAnnotatorClient")
 def test_parse_response_unverified_gun_rejected(mock_client):
     client = GoogleVisionClient()
     response = MagicMock()
@@ -163,7 +163,7 @@ def test_parse_response_unverified_gun_rejected(mock_client):
     assert "unverified weapon/firearm detected" in result.violation_reason
 
 
-@patch("app.features.moderation.product_review.image_pipeline.vision_client.vision.ImageAnnotatorClient")
+@patch("app.integrations.google_vision.vision.ImageAnnotatorClient")
 def test_parse_response_toy_gun_labeled_as_firearm(mock_client):
     client = GoogleVisionClient()
     response = MagicMock()
@@ -197,7 +197,7 @@ def test_parse_response_toy_gun_labeled_as_firearm(mock_client):
     assert result.toy_label_found is True
 
 
-@patch("app.features.moderation.product_review.image_pipeline.vision_client.vision.ImageAnnotatorClient")
+@patch("app.integrations.google_vision.vision.ImageAnnotatorClient")
 def test_parse_response_water_gun_labeled_as_shotgun(mock_client):
     client = GoogleVisionClient()
     response = MagicMock()
@@ -231,7 +231,7 @@ def test_parse_response_water_gun_labeled_as_shotgun(mock_client):
     assert result.toy_label_found is True
 
 
-@patch("app.features.moderation.product_review.image_pipeline.vision_client.vision.ImageAnnotatorClient")
+@patch("app.integrations.google_vision.vision.ImageAnnotatorClient")
 def test_parse_response_ghostface_mask_allowed(mock_client):
     client = GoogleVisionClient()
     response = MagicMock()
@@ -263,7 +263,7 @@ def test_parse_response_ghostface_mask_allowed(mock_client):
     assert result.toy_label_found is True
 
 
-@patch("app.features.moderation.product_review.image_pipeline.vision_client.vision.ImageAnnotatorClient")
+@patch("app.integrations.google_vision.vision.ImageAnnotatorClient")
 def test_parse_response_batman_mask_allowed(mock_client):
     client = GoogleVisionClient()
     response = MagicMock()
@@ -295,7 +295,7 @@ def test_parse_response_batman_mask_allowed(mock_client):
     assert result.toy_label_found is True
 
 
-@patch("app.features.moderation.product_review.image_pipeline.vision_client.vision.ImageAnnotatorClient")
+@patch("app.integrations.google_vision.vision.ImageAnnotatorClient")
 def test_parse_response_normal_toy_mask_allowed(mock_client):
     client = GoogleVisionClient()
     response = MagicMock()
