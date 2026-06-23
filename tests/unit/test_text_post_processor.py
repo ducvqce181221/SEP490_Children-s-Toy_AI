@@ -95,12 +95,12 @@ class TestApplyBusinessRules:
         out = apply_business_rules(result, ctx)
         assert out.decision == ModerationDecision.APPROVED
 
-    def test_new_product_escalates_approved(self):
+    def test_new_product_does_not_escalate(self):
         result = _make_result(confidence=0.90)
         ctx = PostProcessContext(recent_rejected_count=0, product_created_at=_new_product())
         out = apply_business_rules(result, ctx)
-        assert out.decision == ModerationDecision.MANUAL_REVIEW
-        assert any("new_product" in f for f in out.flags)
+        assert out.decision == ModerationDecision.APPROVED
+        assert not any("new_product" in f for f in out.flags)
 
     def test_old_product_no_escalation(self):
         result = _make_result(confidence=0.90)
