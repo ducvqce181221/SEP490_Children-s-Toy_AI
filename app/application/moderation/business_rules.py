@@ -23,7 +23,7 @@ class PostProcessContext:
     Populated by the repository before calling post_processor.
     """
     recent_rejected_count: int    # Rejected reviews by this account in last N days
-    product_created_at: datetime  # UTC datetime when the product was created
+    product_created_at: datetime | None = None  # UTC datetime when the product was created
 
 
 def apply_business_rules(
@@ -66,17 +66,6 @@ def apply_business_rules(
         override_descriptions.append(
             f"Account has {context.recent_rejected_count} recently rejected reviews"
         )
-
-    # Rule 4: New product (created < N days ago) → downgrade APPROVED to MANUAL_REVIEW
-    now_utc = datetime.now(tz=timezone.utc)
-    product_age_days = (now_utc - context.product_created_at.replace(tzinfo=timezone.utc)).days
-    if (
-        result.decision == ModerationDecision.APPROVED
-        and product_age_days < settings.new_product_days
-    ):
-        new_decision = ModerationDecision.MANUAL_REVIEW
-        overrides.append(f"new_product:{product_age_days}d_old")
-        override_descriptions.append("New product requires careful review")
 
     if not overrides:
         return result

@@ -28,44 +28,27 @@ class TestRunImagePrefilter:
 
     def test_black_image_rejected(self):
         img = _make_image((0, 0, 0))
-        result = run_image_prefilter(img, raw_bytes=b"fake", existing_phashes=[])
+        result = run_image_prefilter(img, raw_bytes=b"fake")
         assert result.decision == ModerationDecision.REJECTED
         assert "black_image" in result.flags
 
     def test_very_dark_image_rejected(self):
         img = _make_image((10, 10, 10))
-        result = run_image_prefilter(img, raw_bytes=b"fake", existing_phashes=[])
+        result = run_image_prefilter(img, raw_bytes=b"fake")
         assert result.decision == ModerationDecision.REJECTED
 
     def test_solid_white_rejected(self):
         img = _make_image((255, 255, 255))
-        result = run_image_prefilter(img, raw_bytes=b"fake", existing_phashes=[])
+        result = run_image_prefilter(img, raw_bytes=b"fake")
         assert result.decision == ModerationDecision.REJECTED
         assert "uniform_image" in result.flags
 
     def test_solid_grey_rejected(self):
         img = _make_image((128, 128, 128))
-        result = run_image_prefilter(img, raw_bytes=b"fake", existing_phashes=[])
+        result = run_image_prefilter(img, raw_bytes=b"fake")
         assert result.decision == ModerationDecision.REJECTED
 
     def test_noise_image_passes_prefilter(self):
         img = _make_noise_image()
-        result = run_image_prefilter(img, raw_bytes=b"fake", existing_phashes=[])
+        result = run_image_prefilter(img, raw_bytes=b"fake")
         assert result.decision != ModerationDecision.REJECTED or "phash_duplicate" in result.flags
-
-    def test_phash_duplicate_rejected(self):
-        from app.utils.phash import compute_phash
-        img = _make_noise_image()
-        phash = compute_phash(img)
-        result = run_image_prefilter(img, raw_bytes=b"fake", existing_phashes=[phash])
-        assert result.decision == ModerationDecision.REJECTED
-        assert "phash_duplicate" in result.flags
-
-    def test_different_phash_not_rejected(self):
-        from app.utils.phash import compute_phash
-        img1 = _make_noise_image()
-        img2 = _make_noise_image()
-        phash1 = compute_phash(img1)
-        result = run_image_prefilter(img2, raw_bytes=b"fake", existing_phashes=[phash1])
-        if result.decision == ModerationDecision.REJECTED:
-            assert "phash_duplicate" not in result.flags
