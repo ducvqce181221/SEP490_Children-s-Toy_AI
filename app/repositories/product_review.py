@@ -80,31 +80,6 @@ class ModerationRepository:
                 row = await cur.fetchone()
         return int(row[0]) if row else 0
 
-    async def get_product_created_at(self, product_id: int) -> datetime:
-        sql = "SELECT [CreatedAt] FROM [dbo].[Products] WHERE [ProductID] = ?"
-        async with get_connection() as conn:
-            async with get_cursor(conn) as cur:
-                await cur.execute(sql, product_id)
-                row = await cur.fetchone()
-        if not row:
-            return datetime(2000, 1, 1, tzinfo=timezone.utc)
-        dt = row[0]
-        if isinstance(dt, datetime) and dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-
-    async def get_existing_phashes(self, min_review_count: int = 5, hamming_threshold: int = 10) -> list[str]:
-        sql = """
-            SELECT [PHash] FROM [dbo].[ReviewProductImages]
-            WHERE [PHash] IS NOT NULL AND [IsDeleted] = 0
-            GROUP BY [PHash] HAVING COUNT(DISTINCT [ReviewProductID]) >= ?
-        """
-        async with get_connection() as conn:
-            async with get_cursor(conn) as cur:
-                await cur.execute(sql, min_review_count)
-                rows = await cur.fetchall()
-        return [row[0] for row in rows]
-
     async def update_review_status(self, review_id: int, status: ModerationStatus) -> None:
         sql = """
             UPDATE [dbo].[ReviewProducts]

@@ -83,10 +83,6 @@ class ModerationOrchestrator:
 
         image_results: list[tuple[int, ImagePipelineResult]] = []
         if images:
-            existing_phashes = await self._repo.get_existing_phashes(
-                min_review_count=self._settings.image_phash_duplicate_min_reviews,
-            )
-
             # 1. Download all images in parallel
             settings = self._settings
             load_tasks = [
@@ -119,7 +115,6 @@ class ModerationOrchestrator:
                 prefilter_result = run_image_prefilter(
                     image=load_res.image,
                     raw_bytes=load_res.raw_bytes or b"",
-                    existing_phashes=existing_phashes,
                 )
 
                 if prefilter_result.decision != ModerationDecision.APPROVED:
@@ -274,9 +269,8 @@ class ModerationOrchestrator:
         recent_rejected = await self._repo.get_recent_rejected_count(
             account_id=review.account_id, days=self._settings.account_rejected_review_days,
         )
-        product_created_at = await self._repo.get_product_created_at(review.product_id)
         context = PostProcessContext(
-            recent_rejected_count=recent_rejected, product_created_at=product_created_at,
+            recent_rejected_count=recent_rejected,
         )
         return apply_business_rules(llm_result, context)
 

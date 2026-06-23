@@ -14,7 +14,7 @@ from PIL import Image
 from app.configs.config import get_settings
 from app.core.logging import get_logger
 from app.schemas.moderation import ModerationDecision, ImagePipelineResult
-from app.utils.phash import compute_phash, is_duplicate
+from app.utils.phash import compute_phash
 from app.utils.text_utils import has_hard_profanity, clean_and_normalize_text
 from app.ai.engines.content_analyzer import find_sensitive_patterns
 from app.integrations.google_vision import VisionAnalysisResult
@@ -36,19 +36,9 @@ class PrefilterImageResult:
 def run_image_prefilter(
     image: Image.Image,
     raw_bytes: bytes,
-    existing_phashes: list[str],
 ) -> PrefilterImageResult:
     settings = get_settings()
     phash = _compute_phash_safe(image)
-
-    if existing_phashes and phash:
-        if is_duplicate(phash, existing_phashes, threshold=settings.image_phash_hamming_distance):
-            return PrefilterImageResult(
-                decision=ModerationDecision.REJECTED,
-                flags=["phash_duplicate"],
-                reason="Duplicate of another review (pHash duplicate)",
-                phash=phash,
-            )
 
     try:
         img_cv = _pil_to_cv2_gray(image)

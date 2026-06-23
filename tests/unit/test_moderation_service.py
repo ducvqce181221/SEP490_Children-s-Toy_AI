@@ -42,9 +42,7 @@ async def test_moderation_orchestrator_batch_processing(mocker):
             moderation_status=ModerationStatus.PENDING,
         ),
     ])
-    mock_repo.get_existing_phashes = AsyncMock(return_value=[])
     mock_repo.get_recent_rejected_count = AsyncMock(return_value=0)
-    mock_repo.get_product_created_at = AsyncMock(return_value=None)
     mock_repo.update_review_status = AsyncMock()
     mock_repo.update_image_status = AsyncMock()
     mock_repo.insert_moderation_log = AsyncMock()
@@ -134,7 +132,6 @@ async def test_moderation_orchestrator_rating_only_review(mocker):
     # Mock Repository
     mock_repo = MagicMock()
     mock_repo.fetch_images_for_review = AsyncMock(return_value=[])
-    mock_repo.get_existing_phashes = AsyncMock(return_value=[])
     mock_repo.get_recent_rejected_count = AsyncMock(return_value=0)
     mock_repo.update_review_status = AsyncMock()
     mock_repo.insert_moderation_log = AsyncMock()
