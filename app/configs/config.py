@@ -48,7 +48,7 @@ class Settings(BaseSettings):
         description="Groq API key for non-blog moderation flows",
     )
     groq_model: str = Field(
-        default="llama-3.1-8b-instant",
+        default="openai/gpt-oss-20b",
         validation_alias=AliasChoices("GROQ_MODEL"),
     )
     groq_base_url: str | None = Field(
