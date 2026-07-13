@@ -49,7 +49,6 @@ class ReviewImageRecord(BaseModel):
     review_product_id: int
     image_url: str
     moderation_status: ModerationStatus
-    phash: str | None = None
 
 
 class TextPipelineResult(BaseModel):
@@ -67,7 +66,6 @@ class ImagePipelineResult(BaseModel):
     flags: list[str] = Field(default_factory=list)
     reason: str
     decided_by: str = "vision"
-    phash: str | None = None
     raw_vision_result: dict[str, Any] | None = None
 
 

@@ -51,4 +51,4 @@ class TestRunImagePrefilter:
     def test_noise_image_passes_prefilter(self):
         img = _make_noise_image()
         result = run_image_prefilter(img, raw_bytes=b"fake")
-        assert result.decision != ModerationDecision.REJECTED or "phash_duplicate" in result.flags
+        assert result.decision != ModerationDecision.REJECTED
