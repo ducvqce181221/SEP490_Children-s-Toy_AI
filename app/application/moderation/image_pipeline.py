@@ -14,7 +14,6 @@ from PIL import Image
 from app.configs.config import get_settings
 from app.core.logging import get_logger
 from app.schemas.moderation import ModerationDecision, ImagePipelineResult
-from app.utils.phash import compute_phash
 from app.utils.text_utils import has_hard_profanity, clean_and_normalize_text
 from app.ai.engines.content_analyzer import find_sensitive_patterns
 from app.integrations.google_vision import VisionAnalysisResult
@@ -29,7 +28,6 @@ class PrefilterImageResult:
     decision: ModerationDecision
     flags: list[str] = field(default_factory=list)
     reason: str = ""
-    phash: str | None = None
     diagnostics: dict = field(default_factory=dict)
 
 
@@ -38,7 +36,6 @@ def run_image_prefilter(
     raw_bytes: bytes,
 ) -> PrefilterImageResult:
     settings = get_settings()
-    phash = _compute_phash_safe(image)
 
     try:
         img_cv = _pil_to_cv2_gray(image)
@@ -48,7 +45,6 @@ def run_image_prefilter(
             decision=ModerationDecision.MANUAL_REVIEW,
             flags=["opencv_error"],
             reason=f"Cannot analyze image quality: {exc}",
-            phash=phash,
         )
 
     mean_brightness = float(np.mean(img_cv))
@@ -59,14 +55,14 @@ def run_image_prefilter(
         return PrefilterImageResult(
             decision=ModerationDecision.REJECTED, flags=["black_image"],
             reason=f"Dark image (mean brightness={mean_brightness:.1f} < 20)",
-            phash=phash, diagnostics=diagnostics,
+            diagnostics=diagnostics,
         )
 
     if std_dev < 10:
         return PrefilterImageResult(
             decision=ModerationDecision.REJECTED, flags=["uniform_image"],
             reason=f"Uniform image, no content (std_dev={std_dev:.1f} < 10)",
-            phash=phash, diagnostics=diagnostics,
+            diagnostics=diagnostics,
         )
 
     img_resized = cv2.resize(img_cv, (_RESIZE_DIM, _RESIZE_DIM))
@@ -81,12 +77,12 @@ def run_image_prefilter(
         return PrefilterImageResult(
             decision=ModerationDecision.REJECTED, flags=["blurry_image"],
             reason=f"Blurry image (LV_normalized={lv_normalized:.3f} < {reject_thresh})",
-            phash=phash, diagnostics=diagnostics,
+            diagnostics=diagnostics,
         )
 
     return PrefilterImageResult(
         decision=ModerationDecision.APPROVED, flags=[],
-        reason="Passed local pre-filter", phash=phash, diagnostics=diagnostics,
+        reason="Passed local pre-filter", diagnostics=diagnostics,
     )
 
 
@@ -94,19 +90,10 @@ def _pil_to_cv2_gray(image: Image.Image) -> np.ndarray:
     return cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2GRAY)
 
 
-def _compute_phash_safe(image: Image.Image) -> str | None:
-    try:
-        return compute_phash(image)
-    except Exception as exc:
-        logger.warning("pHash computation failed", error=str(exc))
-        return None
-
-
 def apply_vision_results(
     prefilter_result: PrefilterImageResult,
     vision_result: VisionAnalysisResult,
 ) -> ImagePipelineResult:
-    phash = prefilter_result.phash
 
     if vision_result.hard_violation:
         return ImagePipelineResult(
@@ -114,7 +101,6 @@ def apply_vision_results(
             flags=["vision_hard_violation"],
             reason=f"Severe violation: {vision_result.violation_reason}",
             decided_by="vision_safesearch",
-            phash=phash,
             raw_vision_result=vision_result.raw_response,
         )
 
@@ -126,7 +112,6 @@ def apply_vision_results(
                 flags=["vision_profanity_violation"],
                 reason="Image contains extreme vulgar profanity (auto-blocked from OCR)",
                 decided_by="vision_ocr_profanity",
-                phash=phash,
                 raw_vision_result=vision_result.raw_response,
             )
 
@@ -140,7 +125,6 @@ def apply_vision_results(
                 flags=["vision_text_violation"],
                 reason=f"Image contains sensitive information: {text_violation_reason}",
                 decided_by="vision_ocr",
-                phash=phash,
                 raw_vision_result=vision_result.raw_response,
             )
 
@@ -154,7 +138,6 @@ def apply_vision_results(
             flags=["no_toy_label"],
             reason=f"No matching toy label found. Labels: {', '.join(top_labels)}",
             decided_by="vision_labels",
-            phash=phash,
             raw_vision_result=vision_result.raw_response,
         )
 
@@ -167,6 +150,5 @@ def apply_vision_results(
         flags=[],
         reason=f"Valid image. Labels: {', '.join(top_labels)}",
         decided_by="vision",
-        phash=phash,
         raw_vision_result=vision_result.raw_response,
     )

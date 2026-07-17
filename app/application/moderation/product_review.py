@@ -301,7 +301,7 @@ class ModerationOrchestrator:
         )
         for image_id, img_result in image_results:
             img_status = _DECISION_TO_STATUS[img_result.decision]
-            await self._repo.update_image_status(image_id, img_status, img_result.phash)
+            await self._repo.update_image_status(image_id, img_status)
             
             img_model = "google-vision-v1" if (img_result.decided_by and img_result.decided_by.startswith("vision")) else None
             img_reason = None if img_result.decision == ModerationDecision.APPROVED else img_result.reason

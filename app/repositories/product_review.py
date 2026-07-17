@@ -51,7 +51,7 @@ class ModerationRepository:
     async def fetch_images_for_review(self, review_id: int) -> list[ReviewImageRecord]:
         sql = """
             SELECT [ReviewProductImageID], [ReviewProductID], [ImageURL],
-                   [ModerationStatus], [PHash]
+                   [ModerationStatus]
             FROM [dbo].[ReviewProductImages]
             WHERE [ReviewProductID] = ? AND [IsDeleted] = 0
         """
@@ -62,7 +62,7 @@ class ModerationRepository:
         return [
             ReviewImageRecord(
                 review_product_image_id=row[0], review_product_id=row[1],
-                image_url=row[2], moderation_status=ModerationStatus(row[3]), phash=row[4],
+                image_url=row[2], moderation_status=ModerationStatus(row[3]),
             )
             for row in rows
         ]
@@ -90,25 +90,15 @@ class ModerationRepository:
             async with get_cursor(conn) as cur:
                 await cur.execute(sql, status.value, review_id)
 
-    async def update_image_status(self, image_id: int, status: ModerationStatus, phash: str | None = None) -> None:
-        if phash is not None:
-            sql = """
-                UPDATE [dbo].[ReviewProductImages]
-                SET [ModerationStatus] = ?, [PHash] = ?, [UpdatedAt] = GETUTCDATE()
-                WHERE [ReviewProductImageID] = ?
-            """
-            async with get_connection() as conn:
-                async with get_cursor(conn) as cur:
-                    await cur.execute(sql, status.value, phash, image_id)
-        else:
-            sql = """
-                UPDATE [dbo].[ReviewProductImages]
-                SET [ModerationStatus] = ?, [UpdatedAt] = GETUTCDATE()
-                WHERE [ReviewProductImageID] = ?
-            """
-            async with get_connection() as conn:
-                async with get_cursor(conn) as cur:
-                    await cur.execute(sql, status.value, image_id)
+    async def update_image_status(self, image_id: int, status: ModerationStatus) -> None:
+        sql = """
+            UPDATE [dbo].[ReviewProductImages]
+            SET [ModerationStatus] = ?, [UpdatedAt] = GETUTCDATE()
+            WHERE [ReviewProductImageID] = ?
+        """
+        async with get_connection() as conn:
+            async with get_cursor(conn) as cur:
+                await cur.execute(sql, status.value, image_id)
 
     async def insert_moderation_log(
         self,

@@ -66,7 +66,7 @@ async def test_moderation_orchestrator_batch_processing(mocker):
     # Mock local pre-filter
     from app.application.moderation.image_pipeline import PrefilterImageResult
     mock_prefilter = mocker.patch("app.application.moderation.product_review.run_image_prefilter")
-    mock_prefilter.return_value = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="mockphash")
+    mock_prefilter.return_value = PrefilterImageResult(decision=ModerationDecision.APPROVED)
 
     # Mock Vision Client batch call
     mock_vision_client = MagicMock()
@@ -120,8 +120,8 @@ async def test_moderation_orchestrator_batch_processing(mocker):
     mock_vision_client.analyze_images_batch.assert_called_once_with([b"fakebytes", b"fakebytes"])
     mock_repo.update_review_status.assert_called_once_with(1, ModerationStatus.REJECTED)
     assert mock_repo.update_image_status.call_count == 2
-    mock_repo.update_image_status.assert_any_call(10, ModerationStatus.APPROVED, "mockphash")
-    mock_repo.update_image_status.assert_any_call(11, ModerationStatus.REJECTED, "mockphash")
+    mock_repo.update_image_status.assert_any_call(10, ModerationStatus.APPROVED)
+    mock_repo.update_image_status.assert_any_call(11, ModerationStatus.REJECTED)
 
 
 @pytest.mark.asyncio

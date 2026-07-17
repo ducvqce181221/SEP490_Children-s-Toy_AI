@@ -14,7 +14,7 @@ from app.schemas.moderation import ModerationDecision
 
 
 def test_safesearch_hard_violation_rejected():
-    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED)
     vis_res = VisionAnalysisResult(
         safe_search={"adult": "VERY_LIKELY", "violence": "VERY_UNLIKELY", "racy": "UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
         labels=[{"description": "toy", "score": 0.9}],
@@ -30,7 +30,7 @@ def test_safesearch_hard_violation_rejected():
 
 
 def test_ocr_url_rejected():
-    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED)
     vis_res = VisionAnalysisResult(
         safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
         labels=[{"description": "toy", "score": 0.9}],
@@ -46,7 +46,7 @@ def test_ocr_url_rejected():
 
 
 def test_ocr_phone_rejected():
-    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED)
     vis_res = VisionAnalysisResult(
         safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
         labels=[{"description": "toy", "score": 0.9}],
@@ -62,7 +62,7 @@ def test_ocr_phone_rejected():
 
 
 def test_ocr_bank_rejected():
-    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED)
     vis_res = VisionAnalysisResult(
         safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
         labels=[{"description": "toy", "score": 0.9}],
@@ -78,7 +78,7 @@ def test_ocr_bank_rejected():
 
 
 def test_no_toy_label_rejected():
-    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED)
     vis_res = VisionAnalysisResult(
         safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
         labels=[{"description": "laptop", "score": 0.9}, {"description": "table", "score": 0.8}],
@@ -93,7 +93,7 @@ def test_no_toy_label_rejected():
 
 
 def test_valid_image_approved():
-    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED)
     vis_res = VisionAnalysisResult(
         safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
         labels=[{"description": "teddy bear", "score": 0.9}, {"description": "toy", "score": 0.85}],
@@ -109,7 +109,7 @@ def test_valid_image_approved():
 
 
 def test_ocr_profanity_rejected():
-    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED)
     vis_res = VisionAnalysisResult(
         safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
         labels=[{"description": "toy", "score": 0.9}],
@@ -125,7 +125,7 @@ def test_ocr_profanity_rejected():
 
 
 def test_ocr_obfuscated_phone_rejected():
-    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED)
     vis_res = VisionAnalysisResult(
         safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
         labels=[{"description": "toy", "score": 0.9}],
@@ -141,7 +141,7 @@ def test_ocr_obfuscated_phone_rejected():
 
 
 def test_ocr_obfuscated_profanity_rejected():
-    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED, phash="abc")
+    pre_res = PrefilterImageResult(decision=ModerationDecision.APPROVED)
     vis_res = VisionAnalysisResult(
         safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY", "spoof": "UNKNOWN", "medical": "UNKNOWN"},
         labels=[{"description": "toy", "score": 0.9}],
