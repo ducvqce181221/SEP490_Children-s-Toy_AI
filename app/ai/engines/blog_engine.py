@@ -435,26 +435,17 @@ async def generate_smart_suggestions(
     violation_reason: str,
 ) -> list[str]:
     suggestion_prompt = f"""
-Người dùng vừa yêu cầu tạo blog với thông tin sau:
-- Tiêu đề (title): {title}
-- Nội dung mô tả (content): {content}
+The user requested to generate a blog with the following info:
+- Title: {title}
+- Description: {content}
 
-Yêu cầu này bị từ chối vì lý do: {violation_reason}
-Từ vi phạm: {violated_keyword}
+This request was rejected due to: {violation_reason}
+Violating keyword: {violated_keyword}
 
-Nhiệm vụ của bạn: Tạo đúng 4 gợi ý chủ đề thay thế PHÙ HỢP cho website Children's Toy Store.
+Task: Create exactly 4 alternative topic suggestions IN ENGLISH suitable for Children's Toy Store.
 
-NGUYÊN TẮC GỢI Ý:
-1. Phân tích ý định của người dùng từ title và content họ đã nhập.
-2. Giữ lại tinh thần/mục đích của yêu cầu gốc nhưng chuyển hướng về Children's Toy Store.
-3. Các gợi ý phải đa dạng:
-   - 1 gợi ý: giới thiệu tính năng/dịch vụ của Children's Toy Store (thay thế trực tiếp)
-   - 1 gợi ý: cùng thể loại nội dung nhưng về sản phẩm của Children's Toy Store
-   - 1 gợi ý: chủ đề liên quan đến đồ chơi/giáo dục trẻ em
-   - 1 gợi ý: góc độ khác của cùng chủ đề, phù hợp cho phụ huynh
-
-Trả về JSON theo đúng format, không thêm text nào khác:
-{{"suggestions": ["gợi ý 1", "gợi ý 2", "gợi ý 3", "gợi ý 4"]}}
+Return JSON strictly in this format (no extra text):
+{{"suggestions": ["English topic 1", "English topic 2", "English topic 3", "English topic 4"]}}
 """
     settings = get_settings()
     contextual_fallback = _build_contextual_fallback_suggestions(title, content)

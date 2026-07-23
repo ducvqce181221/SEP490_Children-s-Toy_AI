@@ -52,7 +52,7 @@ OUTPUT FORMAT (strict JSON only, no markdown, no extra text):
   "confidence": <float 0.0-1.0>,
   "category": "clean" | "spam" | "offensive" | "competitor_ad" | "health_concern" | "fake_product" | "profanity_mild" | "ambiguous",
   "flags": [<string>, ...],
-  "reason": "<short reason, max 100 chars>"
+  "reason": "<short reason strictly in English, max 100 chars>"
 }"""
 
 

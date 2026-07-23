@@ -48,6 +48,40 @@ class ModerationRepository:
             for row in rows
         ]
 
+    async def fetch_review_by_id(self, review_id: int) -> ReviewRecord | None:
+        sql = """
+            UPDATE rp
+            SET rp.[ModerationStatus] = 'Processing',
+                rp.[UpdatedAt] = GETUTCDATE()
+            OUTPUT
+                INSERTED.[ReviewID], INSERTED.[AccountID], INSERTED.[ProductID],
+                INSERTED.[OrderID], INSERTED.[Rating], INSERTED.[Comment],
+                INSERTED.[ModerationStatus], INSERTED.[CreatedAt]
+            FROM [dbo].[ReviewProducts] rp WITH (ROWLOCK)
+            WHERE rp.[ReviewID] = ?
+              AND rp.[IsDeleted] = 0
+        """
+        async with get_connection() as conn:
+            async with get_cursor(conn) as cur:
+                await cur.execute(sql, review_id)
+                row = await cur.fetchone()
+        if not row:
+            return None
+        return ReviewRecord(
+            review_id=row[0], account_id=row[1], product_id=row[2],
+            order_id=row[3], rating=row[4], comment=row[5],
+            moderation_status=ModerationStatus(row[6]), created_at=row[7],
+        )
+
+
+    async def get_review_status(self, review_id: int) -> str | None:
+        sql = "SELECT [ModerationStatus] FROM [dbo].[ReviewProducts] WHERE [ReviewID] = ?"
+        async with get_connection() as conn:
+            async with get_cursor(conn) as cur:
+                await cur.execute(sql, review_id)
+                row = await cur.fetchone()
+        return row[0] if row else None
+
     async def fetch_images_for_review(self, review_id: int) -> list[ReviewImageRecord]:
         sql = """
             SELECT [ReviewProductImageID], [ReviewProductID], [ImageURL],
