@@ -68,6 +68,16 @@ class ModerationOrchestrator:
         logger.info("Batch complete", processed=len(reviews))
         return len(reviews)
 
+    async def moderate_single_review(self, review_id: int) -> tuple[bool, str | None]:
+        review = await self._repo.fetch_review_by_id(review_id)
+        if not review:
+            logger.warning("Review not found or deleted for single moderation", review_id=review_id)
+            return False, None
+
+        await self.moderate_review(review)
+        final_status = await self._repo.get_review_status(review_id)
+        return True, final_status
+
     async def moderate_review(self, review: ReviewRecord) -> None:
         logger.info("Starting moderation", review_id=review.review_id)
         try:

@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     google_application_credentials_json: str | None = None
 
     # ── Worker ───────────────────────────────────────────────────────────
-    trigger_mode: Literal["POLL", "OUTBOX"] = "POLL"
+    trigger_mode: Literal["POLL", "OUTBOX", "API"] = "API"
     poll_interval_seconds: int = Field(default=30, gt=0)
     max_concurrent_reviews: int = Field(default=5, gt=0)
     max_retry_attempts: int = Field(default=3, ge=1)

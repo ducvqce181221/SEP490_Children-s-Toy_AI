@@ -24,7 +24,7 @@ _FALLBACK_RESULT: dict[str, Any] = {
     "confidence": 0.0,
     "category": "ambiguous",
     "flags": ["llm_parse_error"],
-    "reason": "Không thể phân tích kết quả LLM, chuyển kiểm duyệt thủ công",
+    "reason": "Failed to parse LLM result, fallback to manual review",
 }
 
 
@@ -118,7 +118,7 @@ async def run_llm_classifier(
             confidence=0.0,
             category="ambiguous",
             flags=["llm_call_failed"],
-            reason="Lỗi khi gọi LLM, chuyển kiểm duyệt thủ công",
+            reason="LLM call error, fallback to manual review",
             decided_by="llm_error",
         )
 
