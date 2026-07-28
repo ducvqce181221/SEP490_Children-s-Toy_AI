@@ -59,6 +59,10 @@ class BlogCommentModerationStatsResponse(BaseModel):
     total: int
 
 
+class ModerateProductReviewRequest(BaseModel):
+    reviewId: int
+
+
 class ModerateOneRequest(BaseModel):
     targetType: BlogCommentTargetType
     targetId: int
@@ -96,6 +100,19 @@ async def trigger_moderation() -> TriggerResponse:
         logger.error("Manual trigger failed", error=str(exc))
         raise HTTPException(status_code=500, detail=f"Moderation batch failed: {exc}")
     return TriggerResponse(message="Moderation batch complete", processed=processed)
+
+
+@router.post(
+    "/product-reviews/moderate-one",
+    response_model=ModerateOneResponse,
+    dependencies=[Depends(verify_internal_key)],
+)
+async def moderate_one_product_review(payload: ModerateProductReviewRequest) -> ModerateOneResponse:
+    logger.info("Moderate single product review request received", review_id=payload.reviewId)
+    orchestrator = ModerationOrchestrator()
+    accepted, final_status = await orchestrator.moderate_single_review(payload.reviewId)
+    return ModerateOneResponse(accepted=accepted, final_status=final_status)
+
 
 
 @router.get("/blog-comments/stats", response_model=BlogCommentModerationStatsResponse)

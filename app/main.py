@@ -16,7 +16,6 @@ from app.configs.config import get_settings
 from app.database.connection import close_db_pool, init_db_pool
 from app.core.logging import get_logger, setup_logging
 from app.api.router import router as moderation_router
-from app.worker.scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
 setup_logging(settings.log_level)
@@ -27,21 +26,15 @@ settings.setup_google_credentials_env()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    logger.info("Starting AI Moderation Sidecar", env=settings.app_env)
+    logger.info("Starting AI Moderation Service", env=settings.app_env)
 
     await init_db_pool()
-
-    if settings.trigger_mode == "POLL":
-        start_scheduler()
-        logger.info("Worker mode: POLL", interval=settings.poll_interval_seconds)
-    else:
-        logger.info("Worker mode: OUTBOX (not yet implemented)")
+    logger.info("Worker mode: DIRECT_API (Internal scheduler removed, operating as stateless REST API microservice)")
 
     yield
 
-    stop_scheduler()
     await close_db_pool()
-    logger.info("AI Moderation Sidecar shutdown complete")
+    logger.info("AI Moderation Service shutdown complete")
 
 
 app = FastAPI(
