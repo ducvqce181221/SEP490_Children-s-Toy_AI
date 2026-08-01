@@ -57,7 +57,7 @@ class Settings(BaseSettings):
         description="Optional OpenAI-compatible base URL override for Groq client",
     )
     groq_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
-    groq_max_tokens: int = Field(default=200, gt=0)
+    groq_max_tokens: int = Field(default=1000, gt=0)
 
     blog_deepseek_api_key: str = Field(
         default="",
