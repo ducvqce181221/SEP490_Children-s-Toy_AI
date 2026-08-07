@@ -1,8 +1,9 @@
 """
 app/ai/engines/blog_engine.py
 -----------------------------
-AI Blog Generation Engine: manages strategy building, calling AI providers (with fallback),
-parsing/formatting generated blog posts, cleaning prompt leakage, and generating recommendations.
+Engine sinh bài viết Blog bằng AI: quản lý xây dựng chiến lược nội dung (Dynamic Writing Strategy),
+gọi AI Provider (DeepSeek chính + Groq dự phòng với cơ chế Retry), parse/format kết quả HTML bài viết,
+loại bỏ rò rỉ prompt (prompt leakage), hỗ trợ sinh gợi ý bài viết thay thế và tạo bài viết dự phòng (heuristic fallback).
 """
 
 from __future__ import annotations
@@ -32,6 +33,12 @@ MIN_CONTENT_LENGTH = 3_000
 
 
 def _contains_vietnamese_signals(text: str) -> bool:
+    """
+    Kiểm tra xem văn bản có chứa các từ/tín hiệu Tiếng Việt hay không.
+    Hệ thống tạo blog quy định đầu ra bài viết phải viết bằng Tiếng Anh.
+    Nếu phát hiện các cụm từ tiếng Việt như 'mở bài', 'thân bài', 'đồ chơi', 'phụ huynh'...,
+    kết quả sẽ bị đánh dấu không đạt và chuyển sang bài viết fallback tiếng Anh chuẩn.
+    """
     lower = f" {(text or '').lower()} "
     return any(
         token in lower
@@ -44,6 +51,10 @@ def _contains_vietnamese_signals(text: str) -> bool:
 
 
 def _pick_variant(seed_text: str, options: list[str]) -> str:
+    """
+    Chọn 1 phần tử ngẫu nhiên từ danh sách options dựa trên mã băm SHA256 của chuỗi seed_text.
+    Giúp cùng 1 input luôn trả về variant nhất quán (Deterministic Selection), nhưng các input khác nhau sẽ nhận các biến thể đa dạng.
+    """
     if not options:
         return ""
     digest = hashlib.sha256(seed_text.encode("utf-8", errors="ignore")).hexdigest()
@@ -52,6 +63,16 @@ def _pick_variant(seed_text: str, options: list[str]) -> str:
 
 
 def _detect_topic_profile(title: str, description: str | None, prompt_structure: str) -> dict[str, str | list[str]]:
+    """
+    Phân tích nội dung tiêu đề và mô tả để xác định hồ sơ chủ đề (Topic Profile).
+    Các nhóm chủ đề chính bao gồm:
+    - toy-safety: An toàn đồ chơi, nguy cơ hóc dị vật, chứng nhận chất lượng
+    - educational-toys: Đồ chơi giáo dục, phát triển tư duy, sáng tạo
+    - outdoor-toys: Đồ chơi vận động ngoài trời, thể chất
+    - stem-toys: Đồ chơi khoa học, công nghệ, lập trình, xếp hình logic
+    - toys-for-toddlers: Đồ chơi cho trẻ chập chập biết đi (1-3 tuổi), giác quan
+    - parent-shopping-guide: Hướng dẫn mua sắm thông minh cho cha mẹ (Mặc định).
+    """
     combined = f"{title}\n{description or ''}\n{prompt_structure}".lower()
     topic = "parent-shopping-guide"
     if any(x in combined for x in ["toy safety", "safe toy", "an toàn", "hazard", "choking", "certification"]):
@@ -131,6 +152,11 @@ def _build_dynamic_writing_strategy(
     prompt_structure: str,
     tone: str,
 ) -> dict[str, str | list[str]]:
+    """
+    Xây dựng chiến lược nội dung động (Dynamic Writing Strategy) cho AI:
+    Lựa chọn kiểu mở bài (intro_style), cấu trúc bài viết (structure), phong cách kêu lưu hành động (cta_style),
+    và định hình góc nhìn nội dung cụ thể dựa trên thông tin yêu cầu.
+    """
     seed = f"{title}|{description or ''}|{prompt_structure}|{tone}"
     intro_styles = [
         "Start with a short parent scenario and a relatable challenge.",
@@ -240,6 +266,11 @@ def _ensure_rewritten_english_title(
 
 
 def _build_structured_fallback_html(title: str, description: str | None, prompt_structure: str, tone: str) -> str:
+    """
+    Hàm sinh bài viết dự phòng (Heuristic Local Fallback) chuẩn định dạng HTML (đủ 3.000 - 6.000 ký tự).
+    Được sử dụng khi dịch vụ AI LLM (DeepSeek / Groq) bị mất kết nối, quá tải hoặc phản hồi không đạt chất lượng.
+    Đảm bảo hệ thống luôn trả về bài viết hoàn chỉnh, giàu thông tin và đáp ứng trải nghiệm người dùng.
+    """
     strategy = _build_dynamic_writing_strategy(
         title=title, description=description, prompt_structure=prompt_structure, tone=tone,
     )
@@ -293,6 +324,7 @@ def _build_structured_fallback_html(title: str, description: str | None, prompt_
 
 
 def _clean_model_text(raw: str) -> str:
+    """Loại bỏ các ký tự bọc Markdown codeblock (```json ... ```) khỏi văn bản phản hồi thô của AI."""
     text = (raw or "").strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
@@ -301,6 +333,7 @@ def _clean_model_text(raw: str) -> str:
 
 
 def _strip_json_prefix_noise(text: str) -> str:
+    """Xóa các tiền tố nhiễu dạng JSON bị thừa trong văn bản bài viết."""
     cleaned = text.strip()
     cleaned = re.sub(
         r'^\s*\{\s*"title"\s*:\s*".*?"\s*,\s*"(?:content|blogContent)"\s*:\s*"',
@@ -315,6 +348,13 @@ def _strip_json_prefix_noise(text: str) -> str:
 
 
 def _to_html_from_text(raw_text: str) -> str:
+    """
+    Chuyển đổi văn bản định dạng Markdown/Text thuần sang văn bản HTML chuẩn:
+    - Chuyển `#`, `##`, `###` thành các thẻ `<h1>`, `<h2>`, `<h3>`
+    - Chuyển danh sách `-` hoặc `*` thành thẻ `<ul><li>...</li></ul>`
+    - Chuyển văn bản in đậm `**text**` thành `<strong>text</strong>`
+    - Chuyển các đoạn văn bản còn lại thành thẻ `<p>`.
+    """
     text = _clean_model_text(raw_text).replace("\\n", "\n")
     if not text:
         return ""
@@ -364,6 +404,13 @@ def _to_html_from_text(raw_text: str) -> str:
 
 
 def _is_low_quality_or_echo(content_html: str) -> bool:
+    """
+    Đánh giá chất lượng của bài viết HTML do AI tạo ra.
+    Trả về True (Kém chất lượng) nếu:
+    - Bài viết chứa các từ khóa nhại lại prompt/metadata ("action:", "promptstructure:")
+    - Độ dài bài viết ngắn hơn độ dài tối thiểu (MIN_CONTENT_LENGTH = 3.000 ký tự)
+    - Bài viết thiếu cấu trúc cơ bản (thẻ <h2 và <p).
+    """
     lower_content = content_html.lower()
     has_echo = (
         ("action:" in lower_content and "promptstructure:" in lower_content)
@@ -380,6 +427,7 @@ def _is_low_quality_or_echo(content_html: str) -> bool:
 
 
 def _remove_forbidden_markers(content_html: str, title: str) -> str:
+    """Xóa các thẻ h1 trùng lặp với tiêu đề bài viết và các nhãn đánh dấu phân đoạn thừa."""
     cleaned = content_html
     cleaned = re.sub(r"^\s*<h1[^>]*>\s*" + re.escape(title.strip()) + r"\s*</h1>\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"<p>\s*(title|description)\s*:\s*.*?</p>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
@@ -388,6 +436,10 @@ def _remove_forbidden_markers(content_html: str, title: str) -> str:
 
 
 def _remove_prompt_leakage(content_html: str, prompt_structure: str) -> str:
+    """
+    Loại bỏ hiện tượng rò rỉ prompt (Prompt Leakage):
+    Quét và xóa các dòng văn bản bị AI sao chép nguyên văn từ danh sách dàn ý prompt_structure vào trong bài viết.
+    """
     cleaned = content_html or ""
     prompt_lines = [line.strip(" -*\t\r\n") for line in (prompt_structure or "").splitlines() if line.strip()]
     for line in prompt_lines:
@@ -434,6 +486,10 @@ async def generate_smart_suggestions(
     violated_keyword: str,
     violation_reason: str,
 ) -> list[str]:
+    """
+    Sinh 4 gợi ý tiêu đề/chủ đề thay thế bằng AI tiếng Anh khi yêu cầu ban đầu bị chặn (bởi Safety Pre-check).
+    Nếu không gọi được AI, sẽ fallback sang danh sách gợi ý theo ngữ cảnh có sẵn.
+    """
     suggestion_prompt = f"""
 The user requested to generate a blog with the following info:
 - Title: {title}
@@ -489,7 +545,13 @@ async def execute_blog_generation(
     source_content: str | None,
 ) -> tuple[str, str]:
     """
-    Coordinates building prompts, calling AI provider with retries, and post-processing the output.
+    Thực thi sinh bài viết blog bằng AI:
+    1. Dựng prompt chiến lược người dùng (User Prompt & System Prompt)
+    2. Gọi DeepSeek (hoặc Groq dự phòng) với số lần thử lại (retries) được cấu hình
+    3. Xử lý bài viết đầu ra: Parse JSON -> Chuẩn hóa tiêu đề -> Chuyển định dạng HTML
+    4. Loại bỏ các ký hiệu thừa và prompt leakage (văn bản bị nhại lại từ prompt)
+    5. Nếu bài viết bị lỗi/kém chất lượng hoặc chứa tín hiệu Tiếng Việt (hệ thống yêu cầu tiếng Anh),
+       sẽ tự động dùng hàm sinh bài viết dự phòng local (_build_structured_fallback_html).
     """
     settings = get_settings()
     strategy = _build_dynamic_writing_strategy(

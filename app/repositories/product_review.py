@@ -1,9 +1,9 @@
-"""
-app/repositories/product_review.py
-----------------------------------
-Database access layer for the product review moderation feature.
-All SQL against SQL Server via aioodbc. No ORM.
-"""
+# ------------------------------------------------------------------------------
+# app/repositories/product_review.py
+# ------------------------------------------------------------------------------
+# Tầng truy xuất cơ sở dữ liệu (Database Access Layer) cho kiểm duyệt Đánh giá sản phẩm.
+# Thực thi các truy vấn T-SQL trực tiếp tới cơ sở dữ liệu SQL Server thông qua aioodbc.
+# ------------------------------------------------------------------------------
 
 from __future__ import annotations
 
@@ -20,8 +20,10 @@ from app.schemas.moderation import (
 logger = get_logger(__name__)
 
 
+# Repository quản lý các truy vấn CSDL cho đánh giá sản phẩm và hình ảnh kèm theo
 class ModerationRepository:
 
+    # Lấy lô (batch) các đánh giá sản phẩm ở trạng thái Pending và chuyển sang Processing
     async def fetch_pending_reviews(self, batch_size: int = 20) -> list[ReviewRecord]:
         sql = f"""
             UPDATE TOP ({int(batch_size)}) rp
@@ -48,6 +50,7 @@ class ModerationRepository:
             for row in rows
         ]
 
+    # Nhận giữ (Claim) 1 đánh giá sản phẩm cụ thể theo ReviewID và chuyển sang Processing
     async def fetch_review_by_id(self, review_id: int) -> ReviewRecord | None:
         sql = """
             UPDATE rp
@@ -73,7 +76,7 @@ class ModerationRepository:
             moderation_status=ModerationStatus(row[6]), created_at=row[7],
         )
 
-
+    # Lấy trạng thái kiểm duyệt hiện tại của 1 đánh giá sản phẩm
     async def get_review_status(self, review_id: int) -> str | None:
         sql = "SELECT [ModerationStatus] FROM [dbo].[ReviewProducts] WHERE [ReviewID] = ?"
         async with get_connection() as conn:
@@ -82,6 +85,7 @@ class ModerationRepository:
                 row = await cur.fetchone()
         return row[0] if row else None
 
+    # Lấy danh sách các bản ghi hình ảnh đính kèm theo ReviewID
     async def fetch_images_for_review(self, review_id: int) -> list[ReviewImageRecord]:
         sql = """
             SELECT [ReviewProductImageID], [ReviewProductID], [ImageURL],
@@ -101,6 +105,7 @@ class ModerationRepository:
             for row in rows
         ]
 
+    # Đếm số lượng đánh giá bị từ chối gần đây của tài khoản trong vòng N ngày
     async def get_recent_rejected_count(self, account_id: int, days: int) -> int:
         since = datetime.now(tz=timezone.utc) - timedelta(days=days)
         sql = """
@@ -114,6 +119,7 @@ class ModerationRepository:
                 row = await cur.fetchone()
         return int(row[0]) if row else 0
 
+    # Cập nhật trạng thái kiểm duyệt mới cho bản ghi đánh giá sản phẩm (Approved, Rejected, ManualReview)
     async def update_review_status(self, review_id: int, status: ModerationStatus) -> None:
         sql = """
             UPDATE [dbo].[ReviewProducts]
@@ -124,6 +130,7 @@ class ModerationRepository:
             async with get_cursor(conn) as cur:
                 await cur.execute(sql, status.value, review_id)
 
+    # Cập nhật trạng thái kiểm duyệt cho từng hình ảnh đính kèm
     async def update_image_status(self, image_id: int, status: ModerationStatus) -> None:
         sql = """
             UPDATE [dbo].[ReviewProductImages]
@@ -134,6 +141,7 @@ class ModerationRepository:
             async with get_cursor(conn) as cur:
                 await cur.execute(sql, status.value, image_id)
 
+    # Thêm nhật ký kiểm duyệt vào bảng [dbo].[ReviewModerationLogs]
     async def insert_moderation_log(
         self,
         review_id: int,
@@ -158,6 +166,7 @@ class ModerationRepository:
                     action, ai_model_version, result_json, (reason or "")[:500],
                 )
 
+    # Đếm số lần gọi LLM bị thất bại liên tiếp của 1 đánh giá
     async def get_failure_count(self, review_id: int) -> int:
         sql = """
             SELECT COUNT(*) FROM [dbo].[ReviewModerationLogs]
@@ -171,6 +180,7 @@ class ModerationRepository:
                 row = await cur.fetchone()
         return int(row[0]) if row else 0
 
+    # Lấy danh sách tài khoản Quản trị viên (Admin - Role 2) và Nhân viên (Staff - Role 3) đang hoạt động
     async def fetch_admin_staff_accounts(self) -> list[dict[str, Any]]:
         sql = """
             SELECT [AccountID], [RoleID] FROM [dbo].[Accounts]
@@ -182,6 +192,7 @@ class ModerationRepository:
                 rows = await cur.fetchall()
         return [{"account_id": row[0], "role_id": row[1]} for row in rows]
 
+    # Lấy tên tài khoản của tác giả đánh giá sản phẩm theo ReviewID
     async def get_reviewer_name_by_review_id(self, review_id: int) -> str:
         sql = """
             SELECT a.[AccountName]
@@ -195,6 +206,7 @@ class ModerationRepository:
                 row = await cur.fetchone()
         return row[0] if row else "Customer"
 
+    # Cập nhật lại nội dung nhận xét sau khi làm sạch teencode/chuẩn hóa văn bản
     async def update_review_comment(self, review_id: int, comment: str) -> None:
         sql = """
             UPDATE [dbo].[ReviewProducts]
@@ -205,6 +217,7 @@ class ModerationRepository:
             async with get_cursor(conn) as cur:
                 await cur.execute(sql, comment, review_id)
 
+    # Thống kê tổng số lượng đánh giá sản phẩm theo từng trạng thái kiểm duyệt
     async def get_review_moderation_stats(self) -> dict[str, int]:
         sql = """
             SELECT [ModerationStatus], COUNT(*) AS cnt
@@ -228,4 +241,5 @@ class ModerationRepository:
             if status in counts:
                 counts[status] = count
         return counts
+
 

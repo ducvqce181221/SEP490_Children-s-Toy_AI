@@ -1,8 +1,9 @@
 """
 app/ai/engines/content_analyzer.py
 -----------------------------------
-Consolidates all rule-based checks, local heuristic classification,
-intent analysis, and safety validations for reviews, blog comments, and articles.
+Tập hợp toàn bộ các quy tắc kiểm tra local (Rule-based checks), phân loại heuristic,
+phân loại ý định chủ đề (Intent Analysis) và kiểm duyệt an toàn (Safety Validations)
+cho Đánh giá sản phẩm, Bình luận/Phản hồi Blog và Bài viết Blog.
 """
 
 from __future__ import annotations
@@ -527,6 +528,11 @@ def _longest_consonant_cluster(token: str) -> int:
 
 
 def detect_inappropriate_emoji_usage(comment: str) -> ContentSignal:
+    """
+    Phát hiện việc sử dụng Emoji không thích hợp hoặc nhạy cảm trong bình luận (vd: Emoji 18+, người lớn, bạo lực).
+    Nếu bình luận có ngữ cảnh văn bản trung tính rõ ràng (đủ dài), emoji sẽ được cho phép.
+    Nếu bình luận chỉ toàn emoji độc hại hoặc emoji chiếm đa số -> Đánh dấu vi phạm quy tắc.
+    """
     blocked_hits = [(emoji, _INAPPROPRIATE_EMOJI_CATEGORIES[emoji]) for emoji in comment if emoji in _INAPPROPRIATE_EMOJI_CATEGORIES]
     if not blocked_hits:
         return ContentSignal(detected=False)
@@ -566,6 +572,18 @@ def detect_inappropriate_emoji_usage(comment: str) -> ContentSignal:
 
 
 def run_blog_comment_prefilter(comment: str) -> BlogCommentPrefilterResult:
+    """
+    Bộ lọc thô local nhanh (Prefilter) cho bình luận & phản hồi bài viết Blog.
+    Kiểm tra và chặn ngay lập tức nếu vi phạm các quy tắc:
+    - Nội dung rỗng hoặc chứa từ rác/spam lặp lại
+    - Tỷ lệ ký tự lặp lại quá 70%
+    - Nội dung gõ phím vô nghĩa (gibberish)
+    - Emoji độc hại/người lớn
+    - Chứa liên kết URL hoặc rút gọn link rác (Lazada, Shopee, bit.ly, v.v.)
+    - Chứa liên hệ mạng xã hội bên ngoài (Zalo, Telegram, Facebook, v.v.)
+    - Lộ thông tin cá nhân (Email, Số điện thoại Việt Nam, Tài khoản ngân hàng, Địa chỉ)
+    - Chứa các từ tục tĩu/chửi thề cực đoan tiếng Việt và tiếng Anh.
+    """
     normalized, rejected, reason = analyze_and_sanitize_text(comment)
     if rejected:
         return BlogCommentPrefilterResult(
@@ -768,6 +786,13 @@ def _build_contextual_fallback_suggestions(title: str, content: str) -> list[str
 
 
 def safety_check(title: str, prompt_structure: str) -> dict[str, str | list[str]] | None:
+    """
+    Kiểm tra an toàn tiền xử lý cho yêu cầu sinh bài viết Blog bằng AI (Safety Pre-check).
+    - Phát hiện Prompt Injection (các hành vi cố tình chèn câu lệnh ép AI làm sai quy tắc).
+    - Phát hiện Nhãn hiệu/Sàn thương mại đối thủ (Shopee, Lazada, Tiki, Mykingdom, v.v.).
+    - Phát hiện chủ đề nhạy cảm độc hại (Bạo lực, máu me, kinh dị).
+    - Phát hiện các từ chửi thề / tục tĩu cực đoan trong tiêu đề hoặc dàn ý.
+    """
     context = _build_user_context(title, prompt_structure)
     injection = _detect_prompt_injection(title, prompt_structure)
     if injection:
@@ -830,6 +855,13 @@ def classify_intent(
     prompt_structure: str,
     category_id: int,
 ) -> dict[str, str | bool | float]:
+    """
+    Phân loại ý định chủ đề (Intent Gate) cho yêu cầu tạo bài viết Blog.
+    Đánh giá điểm số liên quan (Relevance Score) đối với lĩnh vực Đồ chơi & Phụ huynh:
+    - Nếu tiêu đề/prompt lạc đề hoàn toàn hoặc chứa từ khóa bị cấm -> Trả về decision="block".
+    - Nếu điểm liên quan >= 0.55 -> Trả về decision="pass" (Cho phép tiếp tục).
+    - Nếu chưa đủ căn cứ quyết định -> Trả về decision="review" (Vẫn cho phép sinh nhưng ghi log).
+    """
     combined = _build_user_context(title, prompt_structure)
     normalized = _normalize_for_check(combined, strip_diacritic=True)
     if not normalized:
@@ -879,6 +911,10 @@ def classify_intent(
 
 
 def output_validation(content_html: str) -> tuple[str, str]:
+    """
+    Kiểm duyệt an toàn nội dung HTML bài viết đầu ra do AI sinh ra (Output Validation).
+    Xóa emoji cấm độc hại và trả về status="reject" nếu văn bản chứa từ chửi thề hoặc thù ghét.
+    """
     cleaned = content_html
     for emoji in HARD_BLOCK_EMOJIS:
         cleaned = cleaned.replace(emoji, "")
