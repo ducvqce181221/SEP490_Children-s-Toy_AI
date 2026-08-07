@@ -29,6 +29,14 @@ _FALLBACK_RESULT: dict[str, Any] = {
 
 
 def _parse_llm_json(raw: str) -> dict[str, Any]:
+    """
+    Trích xuất và parse chuỗi phản hồi JSON từ AI LLM (DeepSeek / Groq):
+    - Tự động làm sạch các thẻ markdown codeblock (` ```json ... ``` `).
+    - Chuẩn hóa trường 'decision' (APPROVED, REJECTED, MANUAL_REVIEW).
+    - Kiểm tra và ép kiểu điểm tin cậy 'confidence' trong khoảng từ 0.0 đến 1.0.
+    - Xử lý danh sách các cờ vi phạm 'flags' và lý do 'reason'.
+    - Nếu chuỗi JSON bị lỗi không parse được -> Tự động chuyển về _FALLBACK_RESULT (MANUAL_REVIEW).
+    """
     try:
         raw_clean = raw.strip()
         if raw_clean.startswith("```"):
@@ -86,7 +94,8 @@ async def run_llm_classifier(
     rating: int,
 ) -> TextPipelineResult:
     """
-    Classifies product review text using Groq as primary and DeepSeek as fallback.
+    Phân loại nội dung đánh giá sản phẩm (Product Review) bằng AI.
+    Sử dụng Groq làm provider chính và DeepSeek làm provider dự phòng (fallback).
     """
     settings = get_settings()
     normalized = clean_and_normalize_text(comment)
@@ -143,10 +152,25 @@ async def run_blog_comment_classifier(
     comment: str,
 ) -> dict[str, Any]:
     """
-    Classifies blog comment text using DeepSeek as primary and Groq as fallback.
+    Phân loại nội dung bình luận / phản hồi Blog bằng AI:
+    
+    Quy trình hoạt động:
+    --------------------
+    1. Làm sạch văn bản bình luận bằng `clean_and_normalize_text`.
+    2. Dựng prompt gửi AI (`build_user_prompt` với content_type="comment").
+    3. Đóng gói message với System Prompt quy định rõ các quy tắc an toàn.
+    4. Gọi AI Provider:
+       - Đơn vị ưu tiên số 1: DeepSeek AI (nhạy bén trong xử lý tiếng Việt ngữ cảnh & văn phong trẻ em).
+       - Đơn vị dự phòng số 2: Groq AI (tự động kích hoạt nếu DeepSeek gặp sự cố/timeout).
+    5. Parse kết quả trả về bằng `_parse_llm_json`.
+    
+    Returns:
+        Dictionary chứa các thông tin: decision, confidence, category, flags, reason.
     """
     settings = get_settings()
+    # Bước 1: Chuẩn hóa ký tự và dọn dẹp văn bản
     normalized = clean_and_normalize_text(comment)
+    # Bước 2: Dựng nội dung user prompt cho AI
     user_message = build_user_prompt(
         content=comment,
         content_type="comment",
@@ -159,6 +183,7 @@ async def run_blog_comment_classifier(
     ]
 
     try:
+        # Bước 3: Thực thi gọi AI Provider (DeepSeek chính -> Groq dự phòng)
         raw_completion = await execute_chat_completion(
             primary_provider_name="deepseek",
             messages=messages,
@@ -167,7 +192,11 @@ async def run_blog_comment_classifier(
             response_format={"type": "json_object"},
             fallback_provider_name="groq",
         )
+        # Bước 4: Parse kết quả JSON trả về
         return _parse_llm_json(raw_completion)
     except Exception as exc:
+        # Xử lý khi tất cả các provider AI đều gặp lỗi
         logger.error("LLM blog comment classification failed after all retries/fallbacks", error=str(exc))
         return {**_FALLBACK_RESULT, "flags": ["llm_call_failed"]}
+
+

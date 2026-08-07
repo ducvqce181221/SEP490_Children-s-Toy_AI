@@ -1,8 +1,8 @@
 """
 app/repositories/blog_comment.py
 ---------------------------------
-Database access layer for the blog comment moderation feature.
-All SQL against SQL Server via aioodbc. No ORM.
+Tầng truy xuất cơ sở dữ liệu (Database Access Layer) cho tính năng Kiểm duyệt bình luận Blog.
+Thực thi các truy vấn T-SQL trực tiếp tới cơ sở dữ liệu SQL Server thông qua thư viện bất đồng bộ aioodbc (Không dùng ORM).
 """
 
 from __future__ import annotations
@@ -21,17 +21,24 @@ from app.schemas.moderation import (
 
 
 class BlogCommentModerationRepository:
+    """Repository quản lý các truy vấn CSDL liên quan đến bình luận Blog và phản hồi bình luận."""
+
     async def claim_target_for_immediate_moderation(
         self,
         *,
         target_type: BlogCommentTargetType,
         target_id: int,
     ) -> BlogCommentRecord | None:
+        """
+        Nhận giữ (Claim) 1 bình luận hoặc 1 phản hồi cụ thể để kiểm duyệt ngay tức thì:
+        Cập nhật trạng thái từ 'Pending' sang 'Processing' trong CSDL để tránh trùng lặp giữa các worker.
+        """
         if target_type == BlogCommentTargetType.COMMENT:
             return await self._claim_one_review_blog(target_id)
         return await self._claim_one_review_blog_reply(target_id)
 
     async def _claim_one_review_blog(self, target_id: int) -> BlogCommentRecord | None:
+        """Thực thi câu lệnh SQL UPDATE ... OUTPUT chuyển trạng thái bình luận gốc (ReviewBlogs) từ Pending sang Processing."""
         sql = """
             SET NOCOUNT ON;
 
@@ -89,6 +96,7 @@ class BlogCommentModerationRepository:
         )
 
     async def _claim_one_review_blog_reply(self, target_id: int) -> BlogCommentRecord | None:
+        """Thực thi câu lệnh SQL UPDATE ... OUTPUT chuyển trạng thái phản hồi bình luận (ReviewBlogReplies) từ Pending sang Processing."""
         sql = """
             SET NOCOUNT ON;
 
@@ -151,6 +159,7 @@ class BlogCommentModerationRepository:
         target_type: BlogCommentTargetType,
         target_id: int,
     ) -> str | None:
+        """Lấy chuỗi trạng thái ModerationStatus hiện tại của bình luận/phản hồi từ CSDL."""
         if target_type == BlogCommentTargetType.COMMENT:
             sql = """
                 SELECT [ModerationStatus]
@@ -175,6 +184,10 @@ class BlogCommentModerationRepository:
         batch_size: int,
         retry_interval_minutes: int,
     ) -> list[BlogCommentRecord]:
+        """
+        Nhận giữ (Claim) một lô (batch) các bình luận và phản hồi đang ở trạng thái 'Pending' để chạy kiểm duyệt định kỳ (Poll Job).
+        Sử dụng kỹ thuật SQL Server ROWLOCK và READPAST để tranh chấp khóa không làm tắc nghẽn hệ thống.
+        """
         now = datetime.now(tz=timezone.utc)
         retry_due = now - timedelta(minutes=retry_interval_minutes)
         comment_batch = max(1, batch_size // 2)
@@ -190,6 +203,7 @@ class BlogCommentModerationRepository:
         batch_size: int,
         retry_due: datetime,
     ) -> list[BlogCommentRecord]:
+        """Lấy và khóa (Processing) danh sách bình luận gốc (ReviewBlogs) đang chờ kiểm duyệt."""
         sql = f"""
             SET NOCOUNT ON;
 
@@ -253,6 +267,7 @@ class BlogCommentModerationRepository:
         batch_size: int,
         retry_due: datetime,
     ) -> list[BlogCommentRecord]:
+        """Lấy và khóa (Processing) danh sách phản hồi (ReviewBlogReplies) đang chờ kiểm duyệt."""
         sql = f"""
             SET NOCOUNT ON;
 
@@ -312,6 +327,7 @@ class BlogCommentModerationRepository:
         ]
 
     async def get_reason_by_content(self, content: str) -> BlogCommentReason | None:
+        """Tìm bản ghi lý do cấm trong bảng [dbo].[BlogCommentBanReasons] theo chuỗi nội dung lý do."""
         sql = """
             SELECT TOP 1 [BanReasonID], [Content]
             FROM [dbo].[BlogCommentBanReasons]
@@ -326,6 +342,7 @@ class BlogCommentModerationRepository:
         return BlogCommentReason(ban_reason_id=int(row[0]), content=str(row[1]))
 
     async def get_default_rejection_reason(self) -> BlogCommentReason | None:
+        """Lấy lý do từ chối mặc định trong bảng danh mục lý do cấm nếu không tìm thấy lý do cụ thể."""
         sql = """
             SELECT TOP 1 [BanReasonID], [Content]
             FROM [dbo].[BlogCommentBanReasons]
@@ -348,6 +365,7 @@ class BlogCommentModerationRepository:
         target_id: int,
         comment: str,
     ) -> None:
+        """Cập nhật lại văn bản bình luận đã được làm sạch/chuẩn hóa tiếng Việt vào CSDL SQL Server."""
         if target_type == BlogCommentTargetType.COMMENT:
             sql = """
                 UPDATE [dbo].[ReviewBlogs]
@@ -373,6 +391,7 @@ class BlogCommentModerationRepository:
         retry_count: int | None = None,
         manual_review_deadline_hours: int | None = None,
     ) -> None:
+        """Cập nhật trạng thái kiểm duyệt (Approved, Rejected, ManualReview, v.v.) cho bình luận hoặc phản hồi."""
         if target_type == BlogCommentTargetType.COMMENT:
             await self._update_review_blog(
                 target_id=target_id,
@@ -396,6 +415,7 @@ class BlogCommentModerationRepository:
         retry_count: int | None,
         manual_review_deadline_hours: int | None,
     ) -> None:
+        """Cập nhật trạng thái kiểm duyệt và hạn chót duyệt tay (ManualReviewDeadline) cho ReviewBlogs."""
         deadline_sql = "DATEADD(HOUR, ?, GETUTCDATE())" if manual_review_deadline_hours else "NULL"
         if retry_count is None:
             sql = f"""
@@ -435,6 +455,7 @@ class BlogCommentModerationRepository:
         retry_count: int | None,
         manual_review_deadline_hours: int | None,
     ) -> None:
+        """Cập nhật trạng thái kiểm duyệt và hạn chót duyệt tay (ManualReviewDeadline) cho ReviewBlogReplies."""
         deadline_sql = "DATEADD(HOUR, ?, GETUTCDATE())" if manual_review_deadline_hours else "NULL"
         if retry_count is None:
             sql = f"""
@@ -476,6 +497,7 @@ class BlogCommentModerationRepository:
         confidence_score: float | None = None,
         moderation_result: dict[str, object] | None = None,
     ) -> None:
+        """Ghi nhận nhật ký kiểm duyệt vào bảng [dbo].[BlogCommentModerationLogs] để phục vụ audit và theo dõi."""
         result_json = json.dumps(moderation_result, ensure_ascii=False) if moderation_result else None
         sql = """
             INSERT INTO [dbo].[BlogCommentModerationLogs]
@@ -500,6 +522,7 @@ class BlogCommentModerationRepository:
                 )
 
     async def get_or_create_violation_count(self, account_id: int) -> int:
+        """Lấy hoặc khởi tạo bản ghi theo dõi số lần vi phạm của tài khoản trong bảng [dbo].[BlogCommentViolationCount]."""
         select_sql = """
             SELECT [ViolationCount]
             FROM [dbo].[BlogCommentViolationCount]
@@ -523,6 +546,7 @@ class BlogCommentModerationRepository:
         return 0
 
     async def increment_violation(self, account_id: int) -> int:
+        """Tăng số lần vi phạm bình luận của tài khoản trong CSDL và trả về tổng số vi phạm hiện tại."""
         await self.get_or_create_violation_count(account_id)
         sql = """
             SET NOCOUNT ON;
@@ -544,6 +568,7 @@ class BlogCommentModerationRepository:
         return int(row[0] if row else 0)
 
     async def lock_comment_privilege(self, account_id: int, lock_days: int) -> None:
+        """Khóa quyền gửi bình luận của tài khoản N ngày trong bảng [dbo].[BlogCommentViolationCount]."""
         await self.get_or_create_violation_count(account_id)
         sql = """
             UPDATE [dbo].[BlogCommentViolationCount]
@@ -558,6 +583,7 @@ class BlogCommentModerationRepository:
                 await cur.execute(sql, lock_days, account_id)
 
     async def get_expired_manual_review_comments(self) -> list[BlogCommentRecord]:
+        """Lấy danh sách các bình luận ReviewBlogs ở trạng thái ManualReview đã quá hạn xử lý 24 giờ."""
         sql = """
             SELECT [ReviewBlogID], [AccountID], [Comment], [ModerationStatus], [RetryCount], [LastRetryAt], [CreatedAt]
             FROM [dbo].[ReviewBlogs]
@@ -585,6 +611,7 @@ class BlogCommentModerationRepository:
         ]
 
     async def get_expired_manual_review_replies(self) -> list[BlogCommentRecord]:
+        """Lấy danh sách các phản hồi ReviewBlogReplies ở trạng thái ManualReview đã quá hạn xử lý 24 giờ."""
         sql = """
             SELECT [ReplyBlogID], [AccountID], [Comment], [ModerationStatus], [RetryCount], [LastRetryAt], [CreatedAt]
             FROM [dbo].[ReviewBlogReplies]
@@ -612,6 +639,7 @@ class BlogCommentModerationRepository:
         ]
 
     async def get_accounts_to_unlock(self) -> list[int]:
+        """Lấy danh sách ID các tài khoản đang bị khóa bình luận nhưng đã tới thời điểm hết hạn phạt."""
         sql = """
             SELECT [AccountID]
             FROM [dbo].[BlogCommentViolationCount]
@@ -626,6 +654,7 @@ class BlogCommentModerationRepository:
         return [int(row[0]) for row in rows]
 
     async def unlock_comment_privilege(self, account_id: int) -> None:
+        """Mở lại quyền gửi bình luận cho tài khoản và reset số lần vi phạm về 0."""
         sql = """
             UPDATE [dbo].[BlogCommentViolationCount]
             SET [IsCommentBanned] = 0,
@@ -648,6 +677,7 @@ class BlogCommentModerationRepository:
         message: str,
         idempotency_key: str,
     ) -> None:
+        """Thêm thông báo hệ thống cho người dùng vào bảng [Notification].[Deliveries] (có kiểm tra IdempotencyKey)."""
         sql = """
             IF NOT EXISTS (
                 SELECT 1
@@ -668,6 +698,7 @@ class BlogCommentModerationRepository:
                 await cur.execute(sql, idempotency_key, account_id, title, message, "{}", idempotency_key)
 
     async def get_blog_comment_moderation_stats(self) -> dict[str, int]:
+        """Thống kê tổng số lượng bình luận & phản hồi Blog theo từng trạng thái (Pending, Processing, Approved, Rejected, ManualReview, Failed)."""
         counts: dict[str, int] = {
             "Pending": 0,
             "Processing": 0,
@@ -694,4 +725,5 @@ class BlogCommentModerationRepository:
             if status in counts:
                 counts[status] = int(row[1])
         return counts
+
 

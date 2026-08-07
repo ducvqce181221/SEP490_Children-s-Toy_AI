@@ -1,9 +1,9 @@
-"""
-app/database/connection.py
---------------------
-Async SQL Server connection pool via aioodbc.
-Provides an async context manager for obtaining connections.
-"""
+# ------------------------------------------------------------------------------
+# app/database/connection.py
+# ------------------------------------------------------------------------------
+# Quản lý Connection Pool kết nối bất đồng bộ tới SQL Server thông qua thư viện aioodbc.
+# Cung cấp các async context manager để lấy connection và cursor an toàn.
+# ------------------------------------------------------------------------------
 
 from __future__ import annotations
 
@@ -16,15 +16,18 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Module-level pool — initialized at startup, closed at shutdown
+# Khai báo pool kết nối CSDL ở cấp độ module (khởi tạo lúc ứng dụng chạy, đóng lúc shutdown)
 _pool: aioodbc.Pool | None = None
 
 
+# Hàm khởi tạo connection pool aioodbc (Gắn vào sự kiện startup của FastAPI)
 async def init_db_pool() -> None:
-    """Create the aioodbc connection pool. Call once at app startup."""
+    # Sử dụng biến toàn cục _pool để lưu trữ instance của connection pool
     global _pool
     settings = get_settings()
     logger.info("Initializing database connection pool...")
+    
+    # Tạo pool kết nối với minsize=2, maxsize=10, autocommit=False
     _pool = await aioodbc.create_pool(
         dsn=settings.mssql_connection_string,
         minsize=2,
@@ -34,8 +37,8 @@ async def init_db_pool() -> None:
     logger.info("Database connection pool ready")
 
 
+# Hàm đóng connection pool aioodbc (Gắn vào sự kiện shutdown của FastAPI)
 async def close_db_pool() -> None:
-    """Close the pool. Call once at app shutdown."""
     global _pool
     if _pool:
         _pool.close()
@@ -44,30 +47,34 @@ async def close_db_pool() -> None:
         _pool = None
 
 
+# Hàm lấy instance connection pool đang hoạt động (Báo lỗi nếu chưa được khởi tạo)
 def get_pool() -> aioodbc.Pool:
-    """Return the active pool; raises if not initialized."""
     if _pool is None:
         raise RuntimeError("DB pool not initialized. Call init_db_pool() first.")
     return _pool
 
 
+# Context manager bất đồng bộ để mượn 1 kết nối (connection) từ pool
 @asynccontextmanager
 async def get_connection() -> AsyncGenerator[aioodbc.Connection, None]:
-    """Async context manager that yields a connection from the pool."""
     pool = get_pool()
+    # Tự động trả kết nối về pool sau khi dùng xong
     async with pool.acquire() as conn:
         yield conn
 
 
+# Context manager bất đồng bộ để tạo con trỏ (cursor) và tự động Commit / Rollback giao dịch
 @asynccontextmanager
 async def get_cursor(
     conn: aioodbc.Connection,
 ) -> AsyncGenerator[aioodbc.Cursor, None]:
-    """Async context manager that yields a cursor and auto-commits/rolls back."""
     async with conn.cursor() as cur:
         try:
             yield cur
+            # Tự động commit nếu không gặp lỗi
             await conn.commit()
         except Exception:
+            # Tự động rollback nếu xảy ra ngoại lệ
             await conn.rollback()
             raise
+

@@ -22,8 +22,8 @@ class PostProcessContext:
     Extra context needed to apply business rules.
     Populated by the repository before calling post_processor.
     """
-    recent_rejected_count: int    # Rejected reviews by this account in last N days
-    product_created_at: datetime | None = None  # UTC datetime when the product was created
+    recent_rejected_count: int    # Số review bị từ chối của account này trong N ngày gần nhất
+    product_created_at: datetime | None = None  # Ngày tạo UTC của sản phẩm
 
 
 def apply_business_rules(
@@ -34,11 +34,11 @@ def apply_business_rules(
     Apply post-processing business rules that can override the LLM decision.
     """
     settings = get_settings()
-    overrides: list[str] = []
-    override_descriptions: list[str] = []
-    new_decision = result.decision
+    overrides: list[str] = [] # Lưu mã các quy tắc bị vi phạm
+    override_descriptions: list[str] = [] # Lưu mô tả về lý do vi phạm
+    new_decision = result.decision # Mặc định lấy quyết định ban đầu 
 
-    # Rule 1: Low confidence → escalate APPROVED/ambiguous to MANUAL_REVIEW
+    # Rule 1: Nếu độ tin cậy AI < 0.70 → Chuyển từ APPROVED -> MANUAL_REVIEW
     if result.confidence < settings.llm_confidence_threshold:
         if new_decision == ModerationDecision.APPROVED:
             new_decision = ModerationDecision.MANUAL_REVIEW
@@ -47,14 +47,14 @@ def apply_business_rules(
             )
             override_descriptions.append("AI confidence is low")
 
-    # Rule 2: health_concern flag → escalate APPROVED to MANUAL_REVIEW (child safety)
+    # Rule 2: Nếu AI phát hiện bài review có cờ nghi ngờ về sức khỏe/an toàn → Chuyển từ APPROVED -> MANUAL_REVIEW
     if "health_concern" in result.flags:
         if new_decision == ModerationDecision.APPROVED:
             new_decision = ModerationDecision.MANUAL_REVIEW
             overrides.append("health_concern_flag")
             override_descriptions.append("Suspected child health/safety concern")
 
-    # Rule 3: Repeat offender → downgrade APPROVED to MANUAL_REVIEW
+    # Rule 3: Nếu đã bị từ chối N lần trong 30 ngày → Chuyển từ APPROVED -> MANUAL_REVIEW
     if (
         result.decision == ModerationDecision.APPROVED
         and context.recent_rejected_count >= settings.account_rejected_review_max
@@ -67,6 +67,7 @@ def apply_business_rules(
             f"Account has {context.recent_rejected_count} recently rejected reviews"
         )
 
+    # Nếu KHÔNG bị vi phạm -> giữ nguyên kết quả ban đầu
     if not overrides:
         return result
 
@@ -84,9 +85,9 @@ def apply_business_rules(
     return TextPipelineResult(
         decision=new_decision,
         confidence=result.confidence,
-        category=result.category,
+        category=result.category, # Trạng thái mới: MANUAL_REVIEW
         flags=updated_flags,
-        reason=reason[:500],  # DB column limit NVARCHAR(500)
+        reason=reason[:500], 
         decided_by="post_processor",
         raw_llm_result=result.raw_llm_result,
     )
