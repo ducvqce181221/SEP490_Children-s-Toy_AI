@@ -32,7 +32,7 @@ def test_has_hard_profanity_blocks_real_cases() -> None:
     assert not has_hard_profanity("đỉnh vcl")
     assert not has_hard_profanity("buổi sáng")
 
-    # Clean words should not match
+    # Clean words and false positive edge cases should not match
     assert not has_hard_profanity("Sản phẩm tốt")
     assert not has_hard_profanity("Cá cảnh đẹp")
     assert not has_hard_profanity("các sản phẩm của tôi")
@@ -40,6 +40,40 @@ def test_has_hard_profanity_blocks_real_cases() -> None:
     assert not has_hard_profanity("Dịch vụ ổn định")
     assert not has_hard_profanity(None)
     assert not has_hard_profanity("")
+
+    # False Positive Cases Fixed:
+    # 1. cực (cực kỳ, cực đẹp, cực tốt, cực nhanh)
+    assert not has_hard_profanity("Sản phẩm cực kỳ đẹp, cực tốt và giao cực nhanh")
+    assert not has_hard_profanity("cuc ky dep, cuc tot")
+    # 2. dẻo (đất nặn dẻo, nhựa dẻo, kẹo dẻo)
+    assert not has_hard_profanity("Đất nặn dẻo, nhựa dẻo an toàn cho bé")
+    assert not has_hard_profanity("dat nan deo")
+    # 3. đeo (vòng đeo tay, đồng hồ đeo tay)
+    assert not has_hard_profanity("Vòng đeo tay và đồng hồ đeo tay rất xinh")
+    assert not has_hard_profanity("vong deo tay")
+    # 4. lớn (size lớn, kích thước lớn)
+    assert not has_hard_profanity("Bộ xếp hình size lớn, kích thước lớn")
+    assert not has_hard_profanity("size lon, kich thuoc lon")
+    # 5. lợn (gấu bông con lợn, heo lợn nhựa)
+    assert not has_hard_profanity("Gấu bông con lợn màu hồng xinh xắn")
+    assert not has_hard_profanity("heo lon nhua")
+    # 6. cúc / cục (nút cúc áo, cục gỗ, cục lego)
+    assert not has_hard_profanity("Nút cúc áo, cục gỗ xếp hình, cục lego")
+    assert not has_hard_profanity("cuc go, cuc lego, nut cuc ao")
+    # 7. con chó (chú chó Paw Patrol, chó nhồi bông)
+    assert not has_hard_profanity("Chú chó Paw Patrol, chó nhồi bông siêu đáng yêu")
+    assert not has_hard_profanity("chu cho bong, con cho peppa")
+    # 8. rác rưởi (xe dọn rác, đồ chơi phân loại rác rưởi)
+    assert not has_hard_profanity("Bộ đồ chơi phân loại rác rưởi bảo vệ môi trường")
+    # 9. dm (kích thước decimet, direct message)
+    assert not has_hard_profanity("Kích thước hộp dài 5 dm, cao 3 dm")
+    assert not has_hard_profanity("Shop check dm giúp em nha")
+    # 10. đít / dệt / Bandit
+    assert not has_hard_profanity("Phần đít xe mô hình có gắn pin")
+    assert not has_hard_profanity("Bộ máy dệt len cho bé gái")
+    assert not has_hard_profanity("Trò chơi board game Bandit")
+    # 11. cko / cka (teencode gia đình: chồng / chị)
+    assert not has_hard_profanity("Cko mình mua cho bé rất thích")
 
 
 def test_clean_and_normalize_text():
