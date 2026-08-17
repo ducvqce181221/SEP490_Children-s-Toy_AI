@@ -26,8 +26,8 @@ _RAW_HARD_PROFANITY_WORDS = (
     "chó đẻ",
     "khốn nạn",
     "mất dạy",
-    "rác rưởi",
     "cức",
+    "cứk",
 )
 
 # 2. Bảng ánh xạ ký tự Leetspeak (chữ viết thay thế ký tự đặc biệt) về chữ cái nguyên bản
@@ -43,7 +43,7 @@ _LEET_MAP = str.maketrans({
     "|": "i",
 })
 
-# 3. Các biểu thức chính quy (Regex) bắt các biến thể Teen Code và chửi thề không dấu
+# 3. Các biểu thức chính quy (Regex) bắt các biến thể Teen Code và chửi thề không dấu rõ ràng
 _HARD_PROFANITY_PATTERNS = (
     r"\bcon\s*cac\b",
     r"\bcon\s*kac\b",
@@ -52,26 +52,25 @@ _HARD_PROFANITY_PATTERNS = (
     r"\bkac\b",
     r"\bcak\b",
     r"\bcax\b",
-    r"\bcka\b",
-    r"\bkak\b",
-    r"\blon\b",
+    r"\bcon\s*cko(?:['’`]?s)?\b",
     r"\bloz\b",
     r"\blozl\b",
     r"\bl0n\b",
-    r"\bdit\b",
     r"\bdjt\b",
-    r"\bdech\b",
-    r"\bdeo\b",
+    r"\bdit\s*me\b",
+    r"\bdit\s*cu\b",
+    r"\bdit\s*con\b",
     r"\bde0\b",
-    r"\bcon\s*cko\b",
-    r"\bcon\s*cho\b",
     r"\bcho\s*de\b",
-    r"\bdm\b",
+    r"\bdo\s*con\s*cho\b",
     r"\bdmm\b",
+    r"\bdcm\b",
     r"\bclm\b",
     r"\bclmm\b",
-    r"\bcuc\b",
-    r"\bcuk\b",
+    r"\ban\s*cuc\b",
+    r"\ban\s*cuk\b",
+    r"\bcuc\s*cut\b",
+    r"\bnhu\s*cuc\b",
 )
 
 _HARD_PROFANITY_REGEX = [re.compile(p, re.IGNORECASE) for p in _HARD_PROFANITY_PATTERNS]
@@ -81,12 +80,7 @@ _OBFUSCATED_TERMS = (
     "kac",
     "cak",
     "cax",
-    "lon",
-    "dit",
     "djt",
-    "deo",
-    "cuc",
-    "cuk",
 )
 
 
@@ -110,7 +104,6 @@ _OBFUSCATED_PHRASE_REGEX = [
     _build_obfuscated_phrase_pattern("con", "kac"),
     _build_obfuscated_phrase_pattern("con", "cak"),
     _build_obfuscated_phrase_pattern("con", "cax"),
-    _build_obfuscated_phrase_pattern("con", "cko"),
     _build_obfuscated_phrase_pattern("cho", "de"),
 ]
 
@@ -334,18 +327,33 @@ def analyze_and_sanitize_text(text: str) -> tuple[str, bool, str | None]:
     
     Quy tắc kiểm tra:
     -----------------
-    - Nếu 1 ký tự hoặc emoji lặp lại liên tiếp quá 5 lần -> Từ chối (rejected=True) và gắn cờ spam.
-    - Nếu chuỗi ký tự lặp lại quá 3 lần -> Tự động nén/thu gọn về tối đa 3 lần lặp (Sanitization).
-    - Nếu tổng số lượng emoji trong toàn bài vượt quá 10 emoji -> Từ chối vì vi phạm spam emoji.
+    - Nếu hơn 70% văn bản độ dài > 10 chỉ gồm 1 ký tự lặp lại duy nhất -> Từ chối (Repeated character spam).
+    - Tự động nén/thu gọn các chuỗi ký tự lặp lại quá 3 lần về tối đa 3 lần lặp (Sanitization, vd: đẹpppppp -> đẹppp).
+    - Nếu 1 ký tự chữ cái/số lặp lại liên tiếp quá 30 lần -> Từ chối (Spam phá hoại).
+    - Nếu 1 emoji lặp lại liên tiếp quá 8 lần -> Từ chối vì vi phạm spam emoji liên tiếp.
+    - Nếu tổng số lượng emoji trong toàn bài vượt quá 10 emoji -> Từ chối vì vi phạm spam emoji tổng thể.
     
     Returns:
         tuple(normalized_text, rejected_status, reason_if_rejected)
     """
+    if not text:
+        return text, False, None
+
+    # Kiểm tra spam 1 ký tự chiếm > 70% tổng độ dài
+    if len(text) > 10:
+        char_freq: dict[str, int] = {}
+        for ch in text:
+            char_freq[ch] = char_freq.get(ch, 0) + 1
+        max_freq = max(char_freq.values())
+        if max_freq / len(text) > 0.70:
+            return text, True, "Repeated character spam: more than 70% of content is the same character"
+
     graphemes = split_graphemes(text)
     if not graphemes:
         return text, False, None
     
-    max_consecutive_allowed = 5  # Giới hạn lặp liên tiếp tối đa cho phép
+    max_consecutive_chars_allowed = 30  # Giới hạn lặp ký tự chữ cái cực đại trước khi chặn
+    max_consecutive_emojis_allowed = 8   # Giới hạn lặp emoji liên tiếp tối đa
     max_consecutive_for_normalization = 3  # Giới hạn thu gọn nén chuỗi lặp
     
     normalized_graphemes = []
@@ -353,13 +361,14 @@ def analyze_and_sanitize_text(text: str) -> tuple[str, bool, str | None]:
     current_count = 0
     
     for g in graphemes:
+        is_emoji = is_emoji_grapheme(g)
         if g == current_g:
             current_count += 1
-            # Chặn ngay nếu lặp lại quá 5 lần
-            if current_count > max_consecutive_allowed:
-                is_emoji = is_emoji_grapheme(g)
+            # Chặn nếu lặp lại vượt ngưỡng cho phép
+            limit = max_consecutive_emojis_allowed if is_emoji else max_consecutive_chars_allowed
+            if current_count > limit:
                 spam_type = "emoji" if is_emoji else "character"
-                return text, True, f"Excessive consecutive {spam_type} repetition (more than {max_consecutive_allowed} times)"
+                return text, True, f"Excessive consecutive {spam_type} repetition (more than {limit} times)"
             
             if current_count <= max_consecutive_for_normalization:
                 normalized_graphemes.append(g)

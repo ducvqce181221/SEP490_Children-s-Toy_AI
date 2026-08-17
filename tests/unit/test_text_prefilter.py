@@ -32,15 +32,23 @@ class TestRunPrefilter:
         result = run_prefilter("   ")
         assert result.rejected
 
-    def test_less_than_5_meaningful_chars(self):
-        result = run_prefilter("ab!!")
+    def test_less_than_2_meaningful_chars(self):
+        result = run_prefilter("a!!")
         assert result.rejected
         assert "meaningful characters" in result.reason
+
+    def test_short_valid_reviews_pass(self):
+        assert not run_prefilter("Tốt").rejected
+        assert not run_prefilter("Đẹp").rejected
+        assert not run_prefilter("Ok").rejected
+        assert not run_prefilter("Xịn").rejected
+        assert not run_prefilter("10đ").rejected
+        assert not run_prefilter("5 sao").rejected
 
     def test_spam_repetition_rejected(self):
         result = run_prefilter("aaaaaaaaaaaaaaaaaaa")
         assert result.rejected
-        assert "repetition" in result.reason
+        assert "repetition" in result.reason or "Repeated character spam" in result.reason
 
     def test_exactly_70_percent_not_rejected(self):
         result = run_prefilter("abaabaabaab")
@@ -150,4 +158,19 @@ class TestRunPrefilter:
         # 4 emojis should be normalized down to 3, meaning length becomes valid and not rejected
         result = run_prefilter("Hàng tốt 💯💯💯💯")
         assert not result.rejected
+
+    def test_toy_review_false_positive_cases_pass(self):
+        # 1. cực, dẻo, chó bông
+        assert not run_prefilter("Sản phẩm cực kỳ đẹp, đất nặn dẻo và bé rất thích chú chó bông!").rejected
+        # 2. lợn, size lớn, tặng quà
+        assert not run_prefilter("Con lợn nhồi bông size lớn, shop có tặng quà sinh nhật kèm theo").rejected
+        # 3. vòng đeo tay, cục lego
+        assert not run_prefilter("Vòng đeo tay và cục lego cho bé").rejected
+        # 4. Kéo dài phấn khích
+        assert not run_prefilter("Đồ chơi quá đẹpppppp, bé thíchhhhhh").rejected
+        # 5. Tiếng cười, âm thanh
+        assert not run_prefilter("hahahaha xe chạy bíp bíp rất vui").rejected
+        # 6. Mã vận đơn, ngày sinh, kích thước
+        assert not run_prefilter("Mã vận đơn 123456789012 đang giao").rejected
+        assert not run_prefilter("Bé sinh 08.05.2020 nặng 08-09kg chơi vừa vặn").rejected
 
