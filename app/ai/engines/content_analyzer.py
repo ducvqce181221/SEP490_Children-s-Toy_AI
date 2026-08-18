@@ -1,8 +1,9 @@
 """
 app/ai/engines/content_analyzer.py
 -----------------------------------
-Consolidates all rule-based checks, local heuristic classification,
-intent analysis, and safety validations for reviews, blog comments, and articles.
+Tập hợp toàn bộ các quy tắc kiểm tra local (Rule-based checks), phân loại heuristic,
+phân loại ý định chủ đề (Intent Analysis) và kiểm duyệt an toàn (Safety Validations)
+cho Đánh giá sản phẩm, Bình luận/Phản hồi Blog và Bài viết Blog.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ _VN_PHONE_PATTERN = re.compile(
     r"(?<!\d|\w)"
     r"(?:0|\+84)"
     r"(?:3|5|7|8|9)"
-    r"[0-9x*._\-]{3,12}"
+    r"(?:[0-9]{8}|(?:\s*[0-9]){8})"
     r"(?!\d|\w)",
     re.IGNORECASE,
 )
@@ -57,7 +58,8 @@ _LONG_NUMBER_CANDIDATE_PATTERN = re.compile(
 )
 
 _BANK_ACCOUNT_PATTERN = re.compile(
-    r"\b\d{9,14}\b",
+    r"\b(?:stk|tk|tai\s*khoan|ngan\s*hang|bank|chuyen\s*khoan|ck)\b[\s\w:.-]{0,20}?\d{8,16}\b",
+    re.IGNORECASE,
 )
 
 _SQL_PATTERN = re.compile(
@@ -76,14 +78,14 @@ _SOCIAL_PATTERN = re.compile(
 )
 
 _SPAM_PATTERN = re.compile(
-    r"\b(click\s+now|click\s+here|free\s+rewards|get\s+free|free\s+gift|nhan\s+qua\s+mien\s+phi|nhan\s+thuong|click\s+vao|tang\s+qua)\b",
+    r"\b(click\s+now|click\s+here|free\s+rewards|get\s+free|free\s+gift|nhan\s+thuong\s+ngay|click\s+vao\s+link|nhan\s+thuong\s+lon)\b",
     re.IGNORECASE
 )
 
 _INJECTION_PATTERN = re.compile(
     r"\b(skip\s+all\s+validation|ignore\s+previous\s+rules|bypass\s+rules|internal\s+test"
-    r"|bo\s+qua\s+quy\s+tac|bo\s+qua\s+cac\s+quy\s+tac|bo\s+qua\s+rule"
-    r"|khong\s+duoc\s+approved|khong\s+duoc\s+duyet"
+    r"|bo\s+qua\s+quy\s+tac\s+kiem\s+duyet|bo\s+qua\s+cac\s+quy\s+tac|bo\s+qua\s+rule"
+    r"|khong\s+duoc\s+approved\s+review|khong\s+duoc\s+duyet\s+review"
     r"|hay\s+xuat\s+ra\s+ket\s+qua|yeu\s+cau\s+xuat\s+ra)\b",
     re.IGNORECASE
 )
@@ -154,7 +156,7 @@ _INAPPROPRIATE_EMOJI_CATEGORIES: dict[str, str] = {
 
 BLOCKED_KEYWORDS: dict[str, list[str]] = {
     "brand_external": [
-        "mykingdom", "my kingdom", "ti ni", "tini", "tini store", "tiniworld",
+        "mykingdom", "my kingdom", "ti ni store", "tini store", "ti ni world", "tiniworld", "tini world",
         "lazada", "shopee", "tiki", "sendo", "amazon", "bibo mart", "fahasa",
     ],
     "topic_restricted": [
@@ -206,6 +208,11 @@ _EDUCATIONAL_SAFETY_CONTEXT = (
 # Dataclasses & Helper Classes
 # ──────────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Product Review Local Filters (Bộ lọc thô Local cho Đánh giá sản phẩm)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Dataclass chứa kết quả lọc thô cho 1 đánh giá sản phẩm (rejected: cờ từ chối, reason: lý do từ chối)
 @dataclass(frozen=True)
 class PrefilterResult:
     rejected: bool
@@ -235,10 +242,16 @@ class ContentSignal:
     flag: str = ""
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Product Review Local Filters
-# ──────────────────────────────────────────────────────────────────────────────
 
+# Hàm phát hiện các mẫu biểu thức chính quy (Regex) nhạy cảm trong nhận xét đánh giá sản phẩm:
+# - URL/Liên kết rút gọn rác (Lazada, Shopee, bit.ly, v.v.)
+# - Email cá nhân (VD: abc@gmail.com, name [at] domain dot com)
+# - Số điện thoại Việt Nam (VD: 0912..., +84...)
+# - Chuỗi số tài khoản ngân hàng (9-14 chữ số)
+# - Cú pháp truy vấn CSDL SQL (SQL Injection)
+# - Thông tin liên hệ mạng xã hội / tự quảng cáo (Zalo, FB, TikTok, IG...)
+# - Nội dung quảng cáo / Spam clickbait (click vào nhận thưởng, quà miễn phí...)
+# - Hành vi cố tình chèn câu lệnh ép AI làm sai quy tắc (Instruction Injection / Prompt Bypass)
 def find_sensitive_patterns(text: str) -> str | None:
     if _URL_PATTERN.search(text):
         return "Contains URL or shortened link"
@@ -259,19 +272,34 @@ def find_sensitive_patterns(text: str) -> str | None:
     return None
 
 
+# Bộ lọc thô local nhanh (Local Prefilter) dành riêng cho Đánh giá sản phẩm (Product Reviews):
+# Thực hiện kiểm tra và từ chối ngay các đánh giá vi phạm quy tắc mà không cần tốn chi phí gọi AI LLM:
+#
+# Các bước thực thi chi tiết:
+# ---------------------------
+# Bước 1: Làm sạch & nén chuỗi lặp ký tự/emoji bằng `analyze_and_sanitize_text`. Chặn ngay nếu lặp lại >5 lần hoặc lặp >10 emoji.
+# Bước 2: Chặn nhận xét rỗng hoặc chỉ chứa khoảng trắng (Empty content).
+# Bước 3: Chặn nhận xét quá ngắn (dưới 5 ký tự chữ cái/số có nghĩa).
+# Bước 4: Chặn nhận xét rác có tỷ lệ 1 ký tự lặp lại chiếm trên 70% tổng chiều dài văn bản (Repeated character spam).
+# Bước 5: Kiểm tra từ tục tĩu/chửi thề cực đoan tiếng Việt và tiếng Anh bằng `has_hard_profanity`.
+# Bước 6: Kiểm tra các mẫu nhạy cảm bằng `find_sensitive_patterns` (URL, Email, SĐT, Ngân hàng, Quảng cáo, SQL Injection).
 def run_prefilter(comment: str) -> PrefilterResult:
+    # Bước 1: Phân tích nén lặp ký tự & spam emoji
     normalized, rejected, reason = analyze_and_sanitize_text(comment)
     if rejected:
         return PrefilterResult(True, reason)
     comment = normalized
 
+    # Bước 2: Kiểm tra nhận xét rỗng
     if not comment or not comment.strip():
         return PrefilterResult(True, "Empty or whitespace-only content")
 
+    # Bước 3: Kiểm tra độ dài chữ cái/chữ số có nghĩa (Tối thiểu 2 ký tự có nghĩa)
     meaningful_count = sum(1 for ch in comment if ch.isalnum())
-    if meaningful_count < 5:
-        return PrefilterResult(True, f"Too few meaningful characters: {meaningful_count} (minimum 5)")
+    if meaningful_count < 2:
+        return PrefilterResult(True, f"Too few meaningful characters: {meaningful_count} (minimum 2)")
 
+    # Bước 4: Kiểm tra tỷ lệ 1 ký tự lặp lại > 70%
     if len(comment) > 10:
         char_freq: dict[str, int] = {}
         for ch in comment:
@@ -280,17 +308,21 @@ def run_prefilter(comment: str) -> PrefilterResult:
         if max_freq / len(comment) > 0.70:
             return PrefilterResult(True, "Repeated character spam: more than 70% of content is the same character")
 
+    # Bước 5: Kiểm tra từ tục tĩu cực đoan (Hard profanity check)
     normalized = clean_and_normalize_text(comment)
     if has_hard_profanity(comment) or has_hard_profanity(normalized):
         return PrefilterResult(True, "Contains extreme vulgar profanity (auto-blocked)")
 
+    # Bước 6: Kiểm tra các mẫu nhạy cảm (URL, Email, SĐT, Ngân hàng, Quảng cáo, SQL Injection)
     sensitive_reason = find_sensitive_patterns(comment)
     if not sensitive_reason:
         sensitive_reason = find_sensitive_patterns(normalized)
     if sensitive_reason:
         return PrefilterResult(True, sensitive_reason)
 
+    # Nếu vượt qua tất cả các bước -> Đánh giá hợp lệ đối với bộ lọc thô local
     return PrefilterResult(False, "")
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -321,7 +353,15 @@ def _contains_vn_phone(text: str) -> bool:
     return False
 
 
+_BANK_CUE_PATTERN = re.compile(
+    r"\b(?:stk|tk|tai\s*khoan|ngan\s*hang|bank|chuyen\s*khoan|ck|so\s*tk|so\s*tai\s*khoan)\b",
+    re.IGNORECASE
+)
+
+
 def _contains_bank_account_like_number(text: str) -> bool:
+    normalized = normalize_vietnamese_text(text)
+    has_bank_cue = _BANK_CUE_PATTERN.search(normalized) is not None
     for match in _LONG_NUMBER_CANDIDATE_PATTERN.finditer(text):
         token = match.group(0)
         digits = _extract_digits(token)
@@ -329,7 +369,8 @@ def _contains_bank_account_like_number(text: str) -> bool:
             continue
         if _is_vn_phone_candidate(token):
             continue
-        return True
+        if has_bank_cue or (" " in token.strip() or "-" in token.strip() or "." in token.strip()):
+            return True
     return False
 
 
@@ -456,6 +497,12 @@ def _is_meaningless_single_token(token: str) -> bool:
     return False
 
 
+_ALLOWED_ONOMATOPOEIA_UNITS = {
+    "ha", "hi", "he", "ho", "ki", "ka", "la", "bip", "pim", "tu",
+    "reng", "ding", "boom", "go", "chu", "beo", "o", "a",
+}
+
+
 def _is_repeated_pattern(token: str) -> bool:
     if len(token) < 6:
         return False
@@ -465,6 +512,8 @@ def _is_repeated_pattern(token: str) -> bool:
             continue
         unit = token[:unit_length]
         if unit * (len(token) // unit_length) == token and len(token) // unit_length >= 3:
+            if unit.lower() in _ALLOWED_ONOMATOPOEIA_UNITS:
+                return False
             return True
     return False
 
@@ -527,6 +576,11 @@ def _longest_consonant_cluster(token: str) -> int:
 
 
 def detect_inappropriate_emoji_usage(comment: str) -> ContentSignal:
+    """
+    Phát hiện việc sử dụng Emoji không thích hợp hoặc nhạy cảm trong bình luận (vd: Emoji 18+, người lớn, bạo lực).
+    Nếu bình luận có ngữ cảnh văn bản trung tính rõ ràng (đủ dài), emoji sẽ được cho phép.
+    Nếu bình luận chỉ toàn emoji độc hại hoặc emoji chiếm đa số -> Đánh dấu vi phạm quy tắc.
+    """
     blocked_hits = [(emoji, _INAPPROPRIATE_EMOJI_CATEGORIES[emoji]) for emoji in comment if emoji in _INAPPROPRIATE_EMOJI_CATEGORIES]
     if not blocked_hits:
         return ContentSignal(detected=False)
@@ -566,6 +620,18 @@ def detect_inappropriate_emoji_usage(comment: str) -> ContentSignal:
 
 
 def run_blog_comment_prefilter(comment: str) -> BlogCommentPrefilterResult:
+    """
+    Bộ lọc thô local nhanh (Prefilter) cho bình luận & phản hồi bài viết Blog.
+    Kiểm tra và chặn ngay lập tức nếu vi phạm các quy tắc:
+    - Nội dung rỗng hoặc chứa từ rác/spam lặp lại
+    - Tỷ lệ ký tự lặp lại quá 70%
+    - Nội dung gõ phím vô nghĩa (gibberish)
+    - Emoji độc hại/người lớn
+    - Chứa liên kết URL hoặc rút gọn link rác (Lazada, Shopee, bit.ly, v.v.)
+    - Chứa liên hệ mạng xã hội bên ngoài (Zalo, Telegram, Facebook, v.v.)
+    - Lộ thông tin cá nhân (Email, Số điện thoại Việt Nam, Tài khoản ngân hàng, Địa chỉ)
+    - Chứa các từ tục tĩu/chửi thề cực đoan tiếng Việt và tiếng Anh.
+    """
     normalized, rejected, reason = analyze_and_sanitize_text(comment)
     if rejected:
         return BlogCommentPrefilterResult(
@@ -715,7 +781,7 @@ def _detect_unsafe_content(text: str) -> str | None:
     normalized = _normalize_for_check(text, strip_diacritic=not is_vietnamese)
     tokenized = f" {normalized} "
     
-    _SHORT_UNSAFE_TOKENS = (" dm ", " dmm ", " dcm ", " vcl ", " clm ", " clmm ", " dit ", " deo ", " duma ", " dume ")
+    _SHORT_UNSAFE_TOKENS = (" dmm ", " dcm ", " vcl ", " clm ", " clmm ", " duma ", " dume ")
     for short_token in _SHORT_UNSAFE_TOKENS:
         if short_token in tokenized:
             return short_token.strip()
@@ -733,8 +799,8 @@ def _detect_unsafe_content(text: str) -> str | None:
         re.compile(r"\bditme\b", re.IGNORECASE),
         re.compile(r"\bduma\b", re.IGNORECASE),
         re.compile(r"\bdume\b", re.IGNORECASE),
-        re.compile(r"\bcon\s*di\b", re.IGNORECASE),
-        re.compile(r"\bcon\s*me\b", re.IGNORECASE),
+        re.compile(r"\bcon\s*(?:diem|di\s*thoang)\b", re.IGNORECASE),
+        re.compile(r"\bcon\s*me\s*(?:may|no|chung\s*may)\b", re.IGNORECASE),
     ]
     for pattern in _UNSAFE_CONTENT_PATTERNS:
         match = pattern.search(normalized)
@@ -768,6 +834,13 @@ def _build_contextual_fallback_suggestions(title: str, content: str) -> list[str
 
 
 def safety_check(title: str, prompt_structure: str) -> dict[str, str | list[str]] | None:
+    """
+    Kiểm tra an toàn tiền xử lý cho yêu cầu sinh bài viết Blog bằng AI (Safety Pre-check).
+    - Phát hiện Prompt Injection (các hành vi cố tình chèn câu lệnh ép AI làm sai quy tắc).
+    - Phát hiện Nhãn hiệu/Sàn thương mại đối thủ (Shopee, Lazada, Tiki, Mykingdom, v.v.).
+    - Phát hiện chủ đề nhạy cảm độc hại (Bạo lực, máu me, kinh dị).
+    - Phát hiện các từ chửi thề / tục tĩu cực đoan trong tiêu đề hoặc dàn ý.
+    """
     context = _build_user_context(title, prompt_structure)
     injection = _detect_prompt_injection(title, prompt_structure)
     if injection:
@@ -830,6 +903,13 @@ def classify_intent(
     prompt_structure: str,
     category_id: int,
 ) -> dict[str, str | bool | float]:
+    """
+    Phân loại ý định chủ đề (Intent Gate) cho yêu cầu tạo bài viết Blog.
+    Đánh giá điểm số liên quan (Relevance Score) đối với lĩnh vực Đồ chơi & Phụ huynh:
+    - Nếu tiêu đề/prompt lạc đề hoàn toàn hoặc chứa từ khóa bị cấm -> Trả về decision="block".
+    - Nếu điểm liên quan >= 0.55 -> Trả về decision="pass" (Cho phép tiếp tục).
+    - Nếu chưa đủ căn cứ quyết định -> Trả về decision="review" (Vẫn cho phép sinh nhưng ghi log).
+    """
     combined = _build_user_context(title, prompt_structure)
     normalized = _normalize_for_check(combined, strip_diacritic=True)
     if not normalized:
@@ -879,6 +959,10 @@ def classify_intent(
 
 
 def output_validation(content_html: str) -> tuple[str, str]:
+    """
+    Kiểm duyệt an toàn nội dung HTML bài viết đầu ra do AI sinh ra (Output Validation).
+    Xóa emoji cấm độc hại và trả về status="reject" nếu văn bản chứa từ chửi thề hoặc thù ghét.
+    """
     cleaned = content_html
     for emoji in HARD_BLOCK_EMOJIS:
         cleaned = cleaned.replace(emoji, "")

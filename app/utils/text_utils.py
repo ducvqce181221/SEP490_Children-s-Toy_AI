@@ -1,8 +1,22 @@
+"""
+app/utils/text_utils.py
+-----------------------
+Tập hợp các tiện ích xử lý và chuẩn hóa văn bản Tiếng Việt cho hệ thống kiểm duyệt AI.
+
+Bao gồm các chức năng chính:
+1. Phát hiện từ tục tĩu, chửi thề cực đoan (Hard Profanity) tiếng Việt có dấu, không dấu và teen code.
+2. Nhận diện các từ/cụm từ cố tình chèn ký tự đặc biệt hoặc khoảng trắng để lách luật (Obfuscation Detection).
+3. Chuẩn hóa teencode Telex/VNI, chuyển chữ số bằng chữ sang dạng số (VD: "không chín" -> "09").
+4. Gộp các từ/số điện thoại bị gõ cách rời rạc (VD: "0 9 1 2" -> "0912", "g un" -> "gun").
+5. Phân tách cụm đồ họa Grapheme Clusters để phát hiện và ngăn chặn Spam Emoji / Ký tự lặp lại liên tiếp.
+"""
+
 from __future__ import annotations
 
 import re
 import unicodedata
 
+# 1. Danh sách các từ tục tĩu / chửi thề thô cực đoan tiếng Việt nguyên bản (có dấu)
 _RAW_HARD_PROFANITY_WORDS = (
     "cặc",
     "lồn",
@@ -12,10 +26,11 @@ _RAW_HARD_PROFANITY_WORDS = (
     "chó đẻ",
     "khốn nạn",
     "mất dạy",
-    "rác rưởi",
     "cức",
+    "cứk",
 )
 
+# 2. Bảng ánh xạ ký tự Leetspeak (chữ viết thay thế ký tự đặc biệt) về chữ cái nguyên bản
 _LEET_MAP = str.maketrans({
     "@": "a",
     "$": "s",
@@ -28,6 +43,7 @@ _LEET_MAP = str.maketrans({
     "|": "i",
 })
 
+# 3. Các biểu thức chính quy (Regex) bắt các biến thể Teen Code và chửi thề không dấu rõ ràng
 _HARD_PROFANITY_PATTERNS = (
     r"\bcon\s*cac\b",
     r"\bcon\s*kac\b",
@@ -36,74 +52,73 @@ _HARD_PROFANITY_PATTERNS = (
     r"\bkac\b",
     r"\bcak\b",
     r"\bcax\b",
-    r"\bcka\b",
-    r"\bkak\b",
-    r"\blon\b",
+    r"\bcon\s*cko(?:['’`]?s)?\b",
     r"\bloz\b",
     r"\blozl\b",
     r"\bl0n\b",
-    r"\bdit\b",
     r"\bdjt\b",
-    r"\bdech\b",
-    r"\bdeo\b",
+    r"\bdit\s*me\b",
+    r"\bdit\s*cu\b",
+    r"\bdit\s*con\b",
     r"\bde0\b",
-    r"\bcon\s*cko\b",
-    r"\bcon\s*cho\b",
     r"\bcho\s*de\b",
-    r"\bdm\b",
+    r"\bdo\s*con\s*cho\b",
     r"\bdmm\b",
+    r"\bdcm\b",
     r"\bclm\b",
     r"\bclmm\b",
-    r"\bcuc\b",
-    r"\bcuk\b",
+    r"\ban\s*cuc\b",
+    r"\ban\s*cuk\b",
+    r"\bcuc\s*cut\b",
+    r"\bnhu\s*cuc\b",
 )
 
 _HARD_PROFANITY_REGEX = [re.compile(p, re.IGNORECASE) for p in _HARD_PROFANITY_PATTERNS]
 
+# 4. Danh sách các thuật ngữ bị cố ý chèn khoảng trắng/ký tự phân cách ở giữa để lách luật
 _OBFUSCATED_TERMS = (
     "kac",
     "cak",
     "cax",
-    "lon",
-    "dit",
     "djt",
-    "deo",
-    "cuc",
-    "cuk",
 )
 
+
 def _build_obfuscated_word_pattern(word: str) -> re.Pattern[str]:
+    """Tạo Regex nhận diện từ tục tĩu bị cố tình chèn ký tự không phải chữ ([\\W_]*) giữa các chữ cái."""
     letters = [re.escape(ch) for ch in word]
     middle = r"[\W_]*".join(letters)
     return re.compile(rf"(?<![a-z0-9]){middle}(?![a-z0-9])", re.IGNORECASE)
 
 
 def _build_obfuscated_phrase_pattern(*words: str) -> re.Pattern[str]:
+    """Tạo Regex nhận diện cụm từ tục tĩu bị chèn khoảng trắng hoặc ký tự đặc biệt giữa các từ."""
     parts = [r"[\W_]*".join(re.escape(ch) for ch in word) for word in words]
     pattern_str = r"[\W_]+".join(parts)
     return re.compile(rf"(?<![a-z0-9]){pattern_str}(?![a-z0-9])", re.IGNORECASE)
 
 
+# Khởi tạo các mẫu Regex cho cụm từ tục tĩu bị giấu (Obfuscated phrases)
 _OBFUSCATED_PHRASE_REGEX = [
     _build_obfuscated_phrase_pattern("con", "cac"),
     _build_obfuscated_phrase_pattern("con", "kac"),
     _build_obfuscated_phrase_pattern("con", "cak"),
     _build_obfuscated_phrase_pattern("con", "cax"),
-    _build_obfuscated_phrase_pattern("con", "cko"),
     _build_obfuscated_phrase_pattern("cho", "de"),
 ]
 
-
+# Khởi tạo các mẫu Regex cho từng từ tục tĩu bị giấu (Obfuscated words)
 _OBFUSCATED_WORD_REGEX = [_build_obfuscated_word_pattern(term) for term in _OBFUSCATED_TERMS]
 
 
 def normalize_vietnamese_text(text: str | None) -> str:
     """
-    Normalize for moderation matching:
-    - lowercase
-    - leetspeak canonicalization
-    - Vietnamese diacritics removal
-    - keep token boundaries (whitespace preserved, no global concatenation)
+    Hàm chuẩn hóa văn bản tiếng Việt cơ bản cho việc khớp quy tắc kiểm duyệt:
+    - Chuyển thành chữ thường (lowercase)
+    - Ánh xạ Leetspeak (@->$ , 0->o, v.v.)
+    - Bóc tách và loại bỏ dấu thanh tiếng Việt Unicode (diacritics removal)
+    - Thay thế chữ 'đ' thành 'd'
+    - Giữ nguyên ranh giới các từ (không gộp toàn bộ thành chuỗi liền)
     """
     base = (text or "").strip().lower()
     if not base:
@@ -114,6 +129,7 @@ def normalize_vietnamese_text(text: str | None) -> str:
     return re.sub(r"\s+", " ", without_marks)
 
 
+# Bảng ánh xạ chuyển đổi chữ số bằng chữ (Anh & Việt) sang ký tự số tương ứng
 _DIGIT_WORDS_MAP = {
     "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
     "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
@@ -125,25 +141,28 @@ _DIGIT_WORDS_MAP = {
 
 def clean_and_normalize_text(text: str | None) -> str:
     """
-    Unified advanced normalization pipeline for both review text and OCR text.
-    Handles:
-      - Lowercasing and diacritics removal (unaccented base representation)
-      - Telex/VNI style teencode normalization (e.g. ne^u -> neu, ba.n -> ban, muo^'n -> muon)
-      - Number words to digits conversion (e.g. zero nine -> 09)
-      - Collapsing spaced-out words and phone numbers (e.g. g un -> gun, 0 9 -> 09)
+    Pipeline chuẩn hóa văn bản tiếng Việt nâng cao chuyên sâu (Dùng cho cả bài viết, bình luận & OCR):
+    1. Chuyển chữ thường và làm sạch các biểu tượng teencode Telex/VNI (vd: ne^u -> neu, muo^'n -> muon).
+    2. Bảo vệ các từ Tiếng Anh chứa 'ow' (vd: window, yellow, flower, show, shadow...) không bị xóa nhầm.
+    3. Loại bỏ ký tự đánh dấu thanh Teencode VNI/Telex ở đuôi từ (vd: cko's -> cko, ha`ng -> hang).
+    4. Bóc tách dấu thanh Unicode combining diacritics.
+    5. Chuyển đổi các chữ số viết bằng chữ ("không chín" -> "09").
+    6. Gộp các khoảng trắng giữa các chữ số hoặc từ bị cố ý gõ rời rạc (vd: "0 9 1 2" -> "0912", "g un" -> "gun").
+    
+    Returns:
+        Văn bản đã được chuẩn hóa hoàn toàn ở dạng chữ cái không dấu và chữ số gọn gàng.
     """
     if not text:
         return ""
 
-    # Convert to lowercase
     val = text.lower().strip()
 
-    # 1. First round of Telex/VNI symbols mapping inside words
+    # Bước 1: Xử lý các ký tự Teencode / VNI gõ kèm (e^ -> e, o^ -> o, a^ -> a, u* -> u, v.v.)
     val = val.replace("e^", "e").replace("o^", "o").replace("a^", "a")
     val = val.replace("o+", "o").replace("u+", "u").replace("a+", "a")
     val = val.replace("o*", "o").replace("u*", "u").replace("a*", "a")
     
-    # We replace "ow", "uw", "aw" on word level to avoid breaking English words
+    # Danh sách các từ tiếng Anh có đuôi 'ow' cần được miễn trừ không xóa đuôi
     english_ow_words = {
         "below", "how", "now", "low", "show", "grow", "slow", "down", "town", "brown",
         "flower", "power", "allow", "window", "yellow", "shadow", "row", "blow", "snow",
@@ -165,25 +184,22 @@ def clean_and_normalize_text(text: str | None) -> str:
 
     val = re.sub(r"[\^\+\*\\]", "", val)
 
-    # Trailing VNI/Telex tone markers like 's, 'f, 'r, 'x, 'j, '1, '2, etc. (e.g. cko's -> cko)
+    # Loại bỏ các dấu thanh kiểu VNI / Telex (vd: 's, 'f, 'r, 'x, 'j, '1, '2...)
     val = re.sub(r"['``]([sfrxj1-589])\b", "", val)
-    # Strip standalone tone marks at word boundary
     val = re.sub(r"['``](?=\s|$)", "", val)
-    # Strip tone marks inside words (e.g. muo'n -> muon, ha`ng -> hang)
     val = re.sub(r"(?<=[a-zA-Z])['``](?=[a-zA-Z])", "", val)
 
-    # 2. Decompose and remove standard Unicode combining marks (accents)
+    # Bước 2: Bóc tách và loại bỏ dấu thanh Unicode
     decomposed = unicodedata.normalize("NFKD", val)
     val = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
-    # 3. Clean up words (remove remaining diacritics/punctuation from ends/inside)
+    # Bước 3: Làm sạch chữ số phụ đính kèm đuôi VNI (1-5, 8-9)
     words = val.split()
     cleaned_words = []
     for word in words:
         if word.isdigit():
             cleaned_word = word
         else:
-            # Strip VNI trailing tone digits (1-5, 8-9) if attached to word
             w_clean = re.sub(r"(?<=[a-zA-Z])[1-589]\b", "", word)
             cleaned_chars = []
             for ch in w_clean:
@@ -195,7 +211,7 @@ def clean_and_normalize_text(text: str | None) -> str:
 
     normalized_text = " ".join(cleaned_words)
 
-    # 4. Convert written-word digits to numeric forms
+    # Bước 4: Chuyển các từ viết bằng chữ số sang dạng ký tự số
     words = normalized_text.split()
     mapped_words = []
     for w in words:
@@ -205,15 +221,14 @@ def clean_and_normalize_text(text: str | None) -> str:
             mapped_words.append(w)
     normalized_text = " ".join(mapped_words)
 
-    # 5. Collapse spaces
-    # Collapse spaces between adjacent digits (e.g., "0 9 1 2" -> "0912")
+    # Bước 5: Gộp các khoảng trắng thừa giữa các ký tự số đứng liền kề
     normalized_text = re.sub(r"(?<=\d)\s+(?=\d)", "", normalized_text)
 
-    # Collapse spaces in known obfuscated words like "g un", "s d t"
+    # Gộp các từ bị gõ cách rời rạc phổ biến (vd: "g un" -> "gun", "s d t" -> "sdt")
     normalized_text = re.sub(r"\bg\s+un\b", "gun", normalized_text)
     normalized_text = re.sub(r"\bs\s+d\s+t\b", "sdt", normalized_text)
 
-    # General collapsing of adjacent single characters if needed
+    # Vòng lặp gộp các ký tự đơn lẻ đứng cạnh nhau (vd: "c a k" -> "cak")
     prev_text = ""
     while normalized_text != prev_text:
         prev_text = normalized_text
@@ -224,29 +239,31 @@ def clean_and_normalize_text(text: str | None) -> str:
 
 def has_hard_profanity(text: str | None) -> bool:
     """
-    Hard profanity detector designed to avoid substring false positives:
-    - match by boundaries/tokens
-    - allow obfuscation with punctuation or spacing between letters
-    - never concatenate all words into one string for substring scans
+    Hàm phát hiện từ tục tĩu / chửi thề cực đoan (Hard Profanity Detector):
+    Thực hiện qua 4 bước kiểm tra độc lập để tránh bị bắt nhầm các từ chứa substring hợp lệ:
+    1. Kiểm tra trực tiếp các từ chửi thề tiếng Việt nguyên bản có dấu.
+    2. Kiểm tra các biến thể không dấu và teencode sau khi chuẩn hóa.
+    3. Kiểm tra các cụm từ chửi thề bị cố tình chèn khoảng trắng/ký tự rác giữa các từ.
+    4. Kiểm tra từng từ chửi thề bị cố tình chèn khoảng trắng/ký tự rác giữa các chữ cái.
     """
     if not text:
         return False
 
-    # 1. Raw check for accented vulgar words
+    # 1. Kiểm tra các từ chửi thề có dấu trong văn bản gốc
     lower_text = text.lower()
     if any(word in lower_text for word in _RAW_HARD_PROFANITY_WORDS):
         return True
         
-    # 2. Check unaccented / teen code variations after normalization
+    # 2. Kiểm tra các mẫu Regex biến thể không dấu/teencode
     normalized = normalize_vietnamese_text(text)
     if any(pattern.search(normalized) for pattern in _HARD_PROFANITY_REGEX):
         return True
         
-    # 3. Contextual obfuscated phrase check for ambiguous Vietnamese tokens.
+    # 3. Kiểm tra các cụm từ bị chèn ký tự phân cách (Obfuscated phrases)
     if any(pattern.search(normalized) for pattern in _OBFUSCATED_PHRASE_REGEX):
         return True
 
-    # 4. Obfuscated token check with boundaries to avoid substring false positives
+    # 4. Kiểm tra từng từ bị chèn ký tự phân cách (Obfuscated words)
     if any(pattern.search(normalized) for pattern in _OBFUSCATED_WORD_REGEX):
         return True
 
@@ -255,8 +272,8 @@ def has_hard_profanity(text: str | None) -> bool:
 
 def split_graphemes(text: str) -> list[str]:
     """
-    Split a string into visual grapheme clusters, grouping base characters
-    with variation selectors, zero-width joiners, emoji modifiers, and diacritics.
+    Phân tách chuỗi văn bản thành danh sách các cụm ký tự đồ họa hiển thị (Grapheme Clusters).
+    Giúp xử lý chính xác các ký tự phức hợp như Emoji có màu da, Emoji ghép nối (ZWJ), dấu thanh kết hợp.
     """
     graphemes = []
     if not text:
@@ -289,9 +306,7 @@ def split_graphemes(text: str) -> list[str]:
 
 
 def is_emoji_grapheme(g: str) -> bool:
-    """
-    Determine if a grapheme cluster represents an emoji.
-    """
+    """Kiểm tra xem cụm Grapheme g có đại diện cho 1 ký tự Emoji hay không."""
     if not g:
         return False
     code = ord(g[0])
@@ -308,30 +323,52 @@ def is_emoji_grapheme(g: str) -> bool:
 
 def analyze_and_sanitize_text(text: str) -> tuple[str, bool, str | None]:
     """
-    Analyzes review/comment text for emoji and character spam.
+    Phân tích và làm sạch văn bản đánh giá / bình luận để phát hiện hành vi Spam Emoji và Ký tự:
+    
+    Quy tắc kiểm tra:
+    -----------------
+    - Nếu hơn 70% văn bản độ dài > 10 chỉ gồm 1 ký tự lặp lại duy nhất -> Từ chối (Repeated character spam).
+    - Tự động nén/thu gọn các chuỗi ký tự lặp lại quá 3 lần về tối đa 3 lần lặp (Sanitization, vd: đẹpppppp -> đẹppp).
+    - Nếu 1 ký tự chữ cái/số lặp lại liên tiếp quá 30 lần -> Từ chối (Spam phá hoại).
+    - Nếu 1 emoji lặp lại liên tiếp quá 8 lần -> Từ chối vì vi phạm spam emoji liên tiếp.
+    - Nếu tổng số lượng emoji trong toàn bài vượt quá 10 emoji -> Từ chối vì vi phạm spam emoji tổng thể.
+    
     Returns:
-        - normalized_text (str): text with consecutive repetitions collapsed to 3.
-        - rejected (bool): True if the text violates safety thresholds.
-        - reason (str | None): failure description if rejected.
+        tuple(normalized_text, rejected_status, reason_if_rejected)
     """
+    if not text:
+        return text, False, None
+
+    # Kiểm tra spam 1 ký tự chiếm > 70% tổng độ dài
+    if len(text) > 10:
+        char_freq: dict[str, int] = {}
+        for ch in text:
+            char_freq[ch] = char_freq.get(ch, 0) + 1
+        max_freq = max(char_freq.values())
+        if max_freq / len(text) > 0.70:
+            return text, True, "Repeated character spam: more than 70% of content is the same character"
+
     graphemes = split_graphemes(text)
     if not graphemes:
         return text, False, None
     
-    max_consecutive_allowed = 5
-    max_consecutive_for_normalization = 3
+    max_consecutive_chars_allowed = 30  # Giới hạn lặp ký tự chữ cái cực đại trước khi chặn
+    max_consecutive_emojis_allowed = 8   # Giới hạn lặp emoji liên tiếp tối đa
+    max_consecutive_for_normalization = 3  # Giới hạn thu gọn nén chuỗi lặp
     
     normalized_graphemes = []
     current_g = ""
     current_count = 0
     
     for g in graphemes:
+        is_emoji = is_emoji_grapheme(g)
         if g == current_g:
             current_count += 1
-            if current_count > max_consecutive_allowed:
-                is_emoji = is_emoji_grapheme(g)
+            # Chặn nếu lặp lại vượt ngưỡng cho phép
+            limit = max_consecutive_emojis_allowed if is_emoji else max_consecutive_chars_allowed
+            if current_count > limit:
                 spam_type = "emoji" if is_emoji else "character"
-                return text, True, f"Excessive consecutive {spam_type} repetition (more than {max_consecutive_allowed} times)"
+                return text, True, f"Excessive consecutive {spam_type} repetition (more than {limit} times)"
             
             if current_count <= max_consecutive_for_normalization:
                 normalized_graphemes.append(g)
@@ -341,9 +378,10 @@ def analyze_and_sanitize_text(text: str) -> tuple[str, bool, str | None]:
             normalized_graphemes.append(g)
             
     total_emojis = sum(1 for g in normalized_graphemes if is_emoji_grapheme(g))
-    max_total_emojis = 10
+    max_total_emojis = 10  # Giới hạn tổng số lượng emoji tối đa trong 1 bình luận
     if total_emojis > max_total_emojis:
         return text, True, f"Review contains excessive emoji spam (more than {max_total_emojis} emojis)"
         
     return "".join(normalized_graphemes), False, None
+
 

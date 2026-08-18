@@ -130,3 +130,25 @@ class TestBlogCommentPrefilter:
     def test_regular_platform_discussion_is_not_rejected(self):
         result = run_blog_comment_prefilter("Bai viet nay phan tich xu huong do choi tren instagram")
         assert not result.rejected
+
+    def test_laughter_and_onomatopoeia_not_rejected(self):
+        assert not run_blog_comment_prefilter("hahahaha bài viết vui quá").rejected
+        assert not run_blog_comment_prefilter("hihihihi bé nhà mình thích lắm").rejected
+        assert not run_blog_comment_prefilter("hohohoho đồ chơi giáng sinh").rejected
+        assert not run_blog_comment_prefilter("xe ô tô bíp bíp bíp").rejected
+        assert not run_blog_comment_prefilter("tàu hỏa chạy tu tu tu tu").rejected
+        assert not run_blog_comment_prefilter("chuông kêu reng reng reng").rejected
+
+    def test_gift_and_family_context_not_rejected(self):
+        assert not run_blog_comment_prefilter("Shop có tặng quà cho bé nhân dịp sinh nhật").rejected
+        assert not run_blog_comment_prefilter("Dẫn con đi chơi công viên và mua đồ chơi").rejected
+        assert not run_blog_comment_prefilter("Tình cảm giữa con, mẹ nên lắng nghe").rejected
+
+    def test_date_and_measurements_not_rejected_as_phone(self):
+        assert not run_blog_comment_prefilter("Bé sinh ngày 08.05.2020 rất thích xếp hình").rejected
+        assert not run_blog_comment_prefilter("Bé nặng 08-09kg chơi vừa vặn").rejected
+        assert not run_blog_comment_prefilter("Kích thước hộp đồ chơi 0.8-0.9m").rejected
+
+    def test_tracking_and_barcode_not_rejected_as_bank_account(self):
+        assert not run_blog_comment_prefilter("Tra giúp mình mã vận đơn 123456789012").rejected
+        assert not run_blog_comment_prefilter("Mã vạch trên hộp là 8938505012345").rejected

@@ -101,22 +101,27 @@ async def trigger_moderation() -> TriggerResponse:
         raise HTTPException(status_code=500, detail=f"Moderation batch failed: {exc}")
     return TriggerResponse(message="Moderation batch complete", processed=processed)
 
-
+# 1. Endpoint tiếp nhận request kiểm duyệt 1 review sản phẩm
 @router.post(
     "/product-reviews/moderate-one",
     response_model=ModerateOneResponse,
-    dependencies=[Depends(verify_internal_key)],
+    dependencies=[Depends(verify_internal_key)], # Check mật khẩu X-Internal-Key giữa C# và Python
 )
 async def moderate_one_product_review(payload: ModerateProductReviewRequest) -> ModerateOneResponse:
     logger.info("Moderate single product review request received", review_id=payload.reviewId)
     orchestrator = ModerationOrchestrator()
+    # 2. Gọi hàm kiểm duyệt chính và trả về kết quả cho C# Backend
     accepted, final_status = await orchestrator.moderate_single_review(payload.reviewId)
     return ModerateOneResponse(accepted=accepted, final_status=final_status)
 
 
 
+# --- API CHỨC NĂNG AI CHO BLOG ---
+
+# 1. API Thống kê số lượng kiểm duyệt bình luận Blog (Stats)
 @router.get("/blog-comments/stats", response_model=BlogCommentModerationStatsResponse)
 async def get_blog_comment_moderation_stats() -> BlogCommentModerationStatsResponse:
+    """Lấy số lượng bình luận Blog theo từng trạng thái (Pending, Processing, Approved, Rejected, ManualReview, Failed)."""
     service = BlogCommentModerationService()
     try:
         counts = await service.get_comment_moderation_stats()
@@ -136,12 +141,14 @@ async def get_blog_comment_moderation_stats() -> BlogCommentModerationStatsRespo
     )
 
 
+# 2. API Yêu cầu kiểm duyệt tức thì 1 Bình luận / Phản hồi Blog từ C# Backend
 @router.post(
     "/blog-comments/moderate-one",
     response_model=ModerateOneResponse,
-    dependencies=[Depends(verify_internal_key)],
+    dependencies=[Depends(verify_internal_key)], # Xác thực X-Internal-Key
 )
 async def moderate_one_blog_comment(payload: ModerateOneRequest) -> ModerateOneResponse:
+    """Tiếp nhận yêu cầu kiểm duyệt 1 bình luận hoặc phản hồi Blog từ Backend và trả về kết quả thành công/trạng thái."""
     service = BlogCommentModerationService()
     accepted, final_status = await service.moderate_single_comment(
         target_type=payload.targetType,
@@ -150,12 +157,18 @@ async def moderate_one_blog_comment(payload: ModerateOneRequest) -> ModerateOneR
     return ModerateOneResponse(accepted=accepted, final_status=final_status)
 
 
+# 3. API Yêu cầu sinh nội dung bài viết Blog tự động bằng AI (Blog Generation Endpoint)
 @router.post(
     "/blog-content/generate",
     response_model=BlogContentGenerateEndpointResponse,
-    dependencies=[Depends(verify_internal_key)],
+    dependencies=[Depends(verify_internal_key)], # Xác thực X-Internal-Key
 )
 async def generate_blog_content_endpoint(payload: BlogContentGenerateRequest) -> BlogContentGenerateEndpointResponse:
+    """
+    Tiếp nhận yêu cầu sinh nội dung bài viết Blog bằng AI (Generate / Improve / Rewrite).
+    Nếu yêu cầu vi phạm quy tắc an toàn/chủ đề, trả về response bị chặn (BlogContentBlockedResponse) kèm gợi ý.
+    Nếu thành công, trả về tiêu đề và nội dung bài viết chuẩn định dạng HTML (BlogContentGenerateResponse).
+    """
     logger.info(
         "Received blog content generation request",
         action=payload.action,
@@ -191,3 +204,4 @@ async def generate_blog_content_endpoint(payload: BlogContentGenerateRequest) ->
     except BlogContentGenerationError as exc:
         logger.warning("Blog content generation failed", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+

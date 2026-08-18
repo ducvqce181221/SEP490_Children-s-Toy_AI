@@ -98,8 +98,9 @@ def build_user_prompt(
     return "\n".join(parts)
 
 
-# ── Blog Generation Prompts ───────────────────────────────────────────
+# ── Prompt Templates Cho Chức Năng AI Sinh Bài Viết Blog ─────────────────────────────────
 
+# System Prompt định hình vai trò chuyên gia viết blog đồ chơi, yêu cầu xuất đầu ra tiếng Anh SEO-friendly
 BLOG_SYSTEM_PROMPT = (
     "You are a senior blog writer for a children's toy e-commerce website. "
     "Understand Vietnamese and English input, but always output natural SEO-friendly English. "
@@ -121,6 +122,12 @@ def build_blog_user_prompt(
     strategy: dict[str, str | list[str]],
     precontent_rules: str,
 ) -> str:
+    """
+    Dựng chuỗi User Prompt hoàn chỉnh gửi tới AI LLM để tạo bài viết Blog:
+    Bao gồm các tham số yêu cầu (action, title, description, tone, prompt_structure),
+    chiến lược viết bài động (DynamicWritingStrategy: intro style, article flow, topic angle, section ideas, CTA),
+    và áp dụng danh sách các quy định tiền xử lý (precontent_rules).
+    """
     sections_str = ", ".join(strategy.get("topic_sections", []))  # type: ignore[arg-type]
     user_prompt = f"""
 Action: {action}
@@ -152,6 +159,7 @@ Precontent rules (must comply):
 {precontent_rules}
 """
     return user_prompt
+
 
 
 def load_precontent_rules() -> str:
