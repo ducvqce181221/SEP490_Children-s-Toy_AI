@@ -52,6 +52,12 @@ MODERATION PRINCIPLES:
 - Mild slang/profanity with positive intent or negative product-quality complaint intent is APPROVED. Mild slang with neutral but angry intent is MANUAL_REVIEW.
 - Clear violations (abusive direct harassment, baseless fraud accusations, spam, toxic insults) must be REJECTED.
 
+IMAGE OCR & WATERMARK RULES (FOR content_type == "image_ocr"):
+- Text detected on images often includes store watermarks (e.g. "TAM SHOPPE", "Shopee", "Tiki", "Lazada", "TikTok", "Facebook"), brand names (e.g. "LEGO", "Hasbro", "Bandai", "Disney", "Mattel"), toy model names, packaging text, manufacturing origin (e.g. "Made in Vietnam"), age ratings (e.g. "Ages 3+"), or safety instructions.
+- These store watermarks, brand logos, and packaging labels are 100% NORMAL for e-commerce product photos and MUST BE CLASSIFIED AS APPROVED with category "clean".
+- DO NOT flag watermarks or brand names on images as "spam", "competitor_reference", or "competitor_ad".
+- ONLY reject image OCR text if it contains explicit vulgar profanity (e.g. "cặc", "lồn", "địt"), hate speech, sexual content, or phone numbers / links for external scamming.
+
 CRITICAL OUTPUT INSTRUCTIONS:
 - You must output ONLY a valid JSON object.
 - DO NOT wrap the JSON in markdown code blocks (do not use ```json or ```).
