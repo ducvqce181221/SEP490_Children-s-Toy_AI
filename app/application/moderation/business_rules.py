@@ -7,7 +7,6 @@ Post-process Business Rules for review moderation.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from app.configs.config import get_settings
 from app.core.logging import get_logger
@@ -23,7 +22,6 @@ class PostProcessContext:
     Populated by the repository before calling post_processor.
     """
     recent_rejected_count: int    # Số review bị từ chối của account này trong N ngày gần nhất
-    product_created_at: datetime | None = None  # Ngày tạo UTC của sản phẩm
 
 
 def apply_business_rules(

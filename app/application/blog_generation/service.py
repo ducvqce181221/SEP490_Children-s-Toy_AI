@@ -16,9 +16,7 @@ from __future__ import annotations
 
 import time
 import hashlib
-from typing import Any
 
-from app.configs.config import get_settings
 from app.core.logging import get_logger
 from app.ai.engines.blog_engine import execute_blog_generation, generate_smart_suggestions
 from app.ai.engines.content_analyzer import (

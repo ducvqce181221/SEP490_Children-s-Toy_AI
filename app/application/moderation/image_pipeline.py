@@ -1,7 +1,7 @@
 """
 app/application/moderation/image_pipeline.py
 --------------------------------------------
-Local image pre-processing (OpenCV, Pillow, pHash) and post-processing of Vision API results.
+Local image pre-processing (OpenCV, Pillow) and post-processing of Vision API results.
 """
 
 from __future__ import annotations

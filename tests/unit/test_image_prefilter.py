@@ -8,7 +8,6 @@ Uses synthetic PIL images — no external API calls.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 from PIL import Image
 
 from app.application.moderation.image_pipeline import run_image_prefilter

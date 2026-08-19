@@ -6,8 +6,6 @@ Unit tests for image_pipeline/post_processor.py.
 
 from __future__ import annotations
 
-import pytest
-
 from app.application.moderation.image_pipeline import apply_vision_results, PrefilterImageResult
 from app.integrations.google_vision import VisionAnalysisResult
 from app.schemas.moderation import ModerationDecision
