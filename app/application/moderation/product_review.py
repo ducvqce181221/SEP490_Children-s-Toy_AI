@@ -150,7 +150,6 @@ class ModerationOrchestrator:
                             flags=prefilter_result.flags,
                             reason=prefilter_result.reason,
                             decided_by="prefilter",
-                            phash=prefilter_result.phash,
                             raw_vision_result={"diagnostics": prefilter_result.diagnostics},
                         )
                     ))
@@ -196,7 +195,6 @@ class ModerationOrchestrator:
                             flags=["vision_api_failed"],
                             reason=f"Google Vision API error: {v_res_or_exc}",
                             decided_by="vision_error",
-                            phash=prefilter_res.phash,
                         )
                     else:
                         # Áp dụng kết quả từ Vision vào kết quả Prefilter
@@ -219,7 +217,6 @@ class ModerationOrchestrator:
                                         flags=ocr_llm_res.flags + ["vision_ocr_llm"],
                                         reason=f"Invalid content detected in image: {ocr_llm_res.reason}",
                                         decided_by="vision_ocr_llm",
-                                        phash=prefilter_res.phash,
                                         raw_vision_result={
                                             **v_res_or_exc.raw_response,
                                             "ocr_llm_decision": ocr_llm_res.decision.value,

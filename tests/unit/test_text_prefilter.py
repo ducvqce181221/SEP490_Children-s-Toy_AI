@@ -6,7 +6,6 @@ Unit tests for text_pipeline/prefilter.py (no external deps, pure logic).
 
 from __future__ import annotations
 
-import pytest
 from app.ai.engines.content_analyzer import run_prefilter
 
 

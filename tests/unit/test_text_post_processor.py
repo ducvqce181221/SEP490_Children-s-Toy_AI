@@ -6,10 +6,6 @@ Unit tests for text_pipeline/post_processor.py.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
-import pytest
-
 from app.schemas.moderation import ModerationDecision, TextPipelineResult
 from app.application.moderation.business_rules import (
     PostProcessContext,
@@ -28,38 +24,30 @@ def _make_result(
     )
 
 
-def _old_product() -> datetime:
-    return datetime.now(tz=timezone.utc) - timedelta(days=30)
-
-
-def _new_product() -> datetime:
-    return datetime.now(tz=timezone.utc) - timedelta(days=2)
-
-
 class TestApplyBusinessRules:
 
     def test_low_confidence_escalates_to_manual(self):
         result = _make_result(confidence=0.50)
-        ctx = PostProcessContext(recent_rejected_count=0, product_created_at=_old_product())
+        ctx = PostProcessContext(recent_rejected_count=0)
         out = apply_business_rules(result, ctx)
         assert out.decision == ModerationDecision.MANUAL_REVIEW
         assert any("low_confidence" in f for f in out.flags)
 
     def test_confidence_at_threshold_passes(self):
         result = _make_result(confidence=0.70)
-        ctx = PostProcessContext(recent_rejected_count=0, product_created_at=_old_product())
+        ctx = PostProcessContext(recent_rejected_count=0)
         out = apply_business_rules(result, ctx)
         assert out.decision == ModerationDecision.APPROVED
 
     def test_high_confidence_no_change(self):
         result = _make_result(confidence=0.99)
-        ctx = PostProcessContext(recent_rejected_count=0, product_created_at=_old_product())
+        ctx = PostProcessContext(recent_rejected_count=0)
         out = apply_business_rules(result, ctx)
         assert out.decision == ModerationDecision.APPROVED
 
     def test_health_concern_flag_escalates(self):
         result = _make_result(confidence=0.90, flags=["health_concern"])
-        ctx = PostProcessContext(recent_rejected_count=0, product_created_at=_old_product())
+        ctx = PostProcessContext(recent_rejected_count=0)
         out = apply_business_rules(result, ctx)
         assert out.decision == ModerationDecision.MANUAL_REVIEW
         assert any("health_concern" in f for f in out.flags)
@@ -68,7 +56,7 @@ class TestApplyBusinessRules:
         result = _make_result(
             decision=ModerationDecision.REJECTED, confidence=0.90, flags=["health_concern"]
         )
-        ctx = PostProcessContext(recent_rejected_count=0, product_created_at=_old_product())
+        ctx = PostProcessContext(recent_rejected_count=0)
         out = apply_business_rules(result, ctx)
         assert out.decision == ModerationDecision.REJECTED
 
@@ -77,8 +65,7 @@ class TestApplyBusinessRules:
         settings = get_settings()
         result = _make_result(confidence=0.90)
         ctx = PostProcessContext(
-            recent_rejected_count=settings.account_rejected_review_max, 
-            product_created_at=_old_product()
+            recent_rejected_count=settings.account_rejected_review_max,
         )
         out = apply_business_rules(result, ctx)
         assert out.decision == ModerationDecision.MANUAL_REVIEW
@@ -89,28 +76,15 @@ class TestApplyBusinessRules:
         settings = get_settings()
         result = _make_result(confidence=0.90)
         ctx = PostProcessContext(
-            recent_rejected_count=settings.account_rejected_review_max - 1, 
-            product_created_at=_old_product()
+            recent_rejected_count=settings.account_rejected_review_max - 1,
         )
-        out = apply_business_rules(result, ctx)
-        assert out.decision == ModerationDecision.APPROVED
-
-    def test_new_product_does_not_escalate(self):
-        result = _make_result(confidence=0.90)
-        ctx = PostProcessContext(recent_rejected_count=0, product_created_at=_new_product())
-        out = apply_business_rules(result, ctx)
-        assert out.decision == ModerationDecision.APPROVED
-        assert not any("new_product" in f for f in out.flags)
-
-    def test_old_product_no_escalation(self):
-        result = _make_result(confidence=0.90)
-        ctx = PostProcessContext(recent_rejected_count=0, product_created_at=_old_product())
         out = apply_business_rules(result, ctx)
         assert out.decision == ModerationDecision.APPROVED
 
     def test_clean_review_unchanged(self):
         result = _make_result(confidence=0.95)
-        ctx = PostProcessContext(recent_rejected_count=0, product_created_at=_old_product())
+        ctx = PostProcessContext(recent_rejected_count=0)
         out = apply_business_rules(result, ctx)
         assert out.decision == ModerationDecision.APPROVED
         assert out is result
+

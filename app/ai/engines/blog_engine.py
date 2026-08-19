@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import re
 import hashlib
-from typing import Any
 
 from app.configs.config import get_settings
 from app.core.logging import get_logger
@@ -22,7 +21,6 @@ from app.ai.prompts.templates import (
     load_precontent_rules,
 )
 from app.ai.engines.content_analyzer import (
-    output_validation,
     _build_contextual_fallback_suggestions,
 )
 
@@ -629,7 +627,6 @@ async def execute_blog_generation(
 
             return generated_title, blog_content
         except Exception as exc:
-            last_error = f"Generation failure: {exc}"
             logger.warning("Generation attempt failed", attempt=attempt + 1, error=str(exc))
             continue
 
