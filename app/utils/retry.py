@@ -6,7 +6,6 @@ Async retry decorator with exponential backoff using tenacity.
 
 from __future__ import annotations
 
-import asyncio
 import functools
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
