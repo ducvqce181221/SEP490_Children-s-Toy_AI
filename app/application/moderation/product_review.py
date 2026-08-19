@@ -17,7 +17,7 @@ from app.schemas.moderation import (
     ImagePipelineResult, ModerationDecision, ModerationStatus,
     ReviewImageRecord, ReviewRecord, TextPipelineResult,
 )
-from app.ai.engines.moderation_engine import run_llm_classifier
+from app.ai.engines.moderation_engine import run_llm_classifier, run_image_ocr_classifier
 from app.application.moderation.business_rules import apply_business_rules, PostProcessContext
 from app.ai.engines.content_analyzer import run_prefilter
 from app.integrations.notification import NotificationService
@@ -205,12 +205,11 @@ class ModerationOrchestrator:
                             meaningful_ocr_len = sum(1 for ch in v_res_or_exc.detected_text if ch.isalnum())                 
                             # Kiểm tra độ dài OCR để tránh text rác
                             if meaningful_ocr_len >= 5:
-                                # Gọi LLM để phân tích nội dung OCR
-                                ocr_llm_res = await run_llm_classifier(
-                                    comment=v_res_or_exc.detected_text,
-                                    rating=review.rating or 5
+                                # Gọi LLM để phân tích nội dung OCR theo quy tắc riêng cho hình ảnh (chấp nhận watermark/logo/tên shop)
+                                ocr_llm_res = await run_image_ocr_classifier(
+                                    detected_text=v_res_or_exc.detected_text,
                                 )
-                                # Nếu LLM phát hiện nội dung độc hại, ghi đè kết quả
+                                # Nếu LLM phát hiện nội dung độc hại (từ tục tĩu nặng, lừa đảo...), ghi đè kết quả
                                 if ocr_llm_res.decision != ModerationDecision.APPROVED:
                                     img_pipeline_res = ImagePipelineResult(
                                         decision=ocr_llm_res.decision,

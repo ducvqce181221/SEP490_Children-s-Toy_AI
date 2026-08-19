@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.configs.config import get_settings
@@ -33,22 +34,32 @@ _FALLBACK_RESULT: dict[str, Any] = {
 def _parse_llm_json(raw: str) -> dict[str, Any]:
     """
     Trích xuất và parse chuỗi phản hồi JSON từ AI LLM:
-    - Tự động làm sạch các thẻ markdown codeblock (` ```json ... ``` `).
+    - Loại bỏ thẻ suy luận <think>...</think> (từ các mô hình reasoning).
+    - Tìm kiếm và bóc tách khối Markdown Code Block (```json ... ```) hoặc khối JSON { ... }.
+    - Loại bỏ các lỗi cú pháp phổ biến như dấu phẩy thừa (trailing commas).
     - Chuẩn hóa trường 'decision' (APPROVED, REJECTED, MANUAL_REVIEW).
     - Kiểm tra và ép kiểu điểm tin cậy 'confidence' trong khoảng từ 0.0 đến 1.0.
     - Xử lý danh sách các cờ vi phạm 'flags' và lý do 'reason'.
     - Nếu chuỗi JSON bị lỗi không parse được -> Tự động chuyển về _FALLBACK_RESULT (MANUAL_REVIEW).
     """
     try:
-        # Làm sạch khoảng trắng thừa và bóc tách khối Markdown Code Block nếu AI trả về
         raw_clean = raw.strip()
-        if raw_clean.startswith("```"):
-            lines = raw_clean.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            raw_clean = "\n".join(lines).strip()
+
+        # 1. Loại bỏ các thẻ suy luận <think>...</think> nếu có từ các mô hình reasoning
+        raw_clean = re.sub(r"<think>.*?</think>", "", raw_clean, flags=re.DOTALL).strip()
+
+        # 2. Tìm kiếm khối markdown json ```json ... ``` hoặc ``` ... ```
+        code_block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_clean, flags=re.DOTALL)
+        if code_block:
+            raw_clean = code_block.group(1).strip()
+        else:
+            # 3. Tìm kiếm khối JSON bao bọc bởi { ... }
+            json_block = re.search(r"(\{.*\})", raw_clean, flags=re.DOTALL)
+            if json_block:
+                raw_clean = json_block.group(1).strip()
+
+        # 4. Sửa lỗi trailing comma phổ biến trong JSON do LLM sinh ra (ví dụ: {"a": 1, })
+        raw_clean = re.sub(r",\s*([\]}])", r"\1", raw_clean)
 
         # Parse dữ liệu JSON
         data = json.loads(raw_clean)
@@ -217,6 +228,82 @@ async def run_blog_comment_classifier(
         # Xử lý khi tất cả các provider AI đều gặp lỗi
         logger.error("LLM blog comment classification failed after all retries/fallbacks", error=str(exc))
         return {**_FALLBACK_RESULT, "flags": ["llm_call_failed"]}
+
+
+# Hàm phân loại nội dung chữ trích xuất từ hình ảnh (Image OCR Text) bằng AI LLM
+async def run_image_ocr_classifier(
+    detected_text: str,
+) -> TextPipelineResult:
+    """
+    Phân loại nội dung văn bản OCR trích xuất từ hình ảnh đánh giá sản phẩm.
+    Quy tắc đặc thù cho OCR ảnh:
+    - Các watermark thương hiệu, tên shop, logo (ví dụ: "TAM SHOPPE", "Shopee", "Tiki", "Lazada", "TikTok"),
+      thông tin bao bì sản phẩm, tên mô hình đồ chơi và cảnh báo an toàn được coi là hợp lệ (APPROVED).
+    - Chỉ từ chối (REJECTED) nếu phát hiện ngôn từ tục tĩu nặng, thù địch, nội dung đồi trụy hoặc lừa đảo.
+    - Nếu LLM gặp sự cố parse hoặc lỗi kết nối, an toàn cho qua (APPROVED) vì ảnh đã qua các bước lọc regex cục bộ.
+    """
+    settings = get_settings()
+    normalized = clean_and_normalize_text(detected_text)
+    user_message = build_user_prompt(
+        content=detected_text,
+        content_type="image_ocr",
+        rating=None,
+        normalized_content=normalized,
+    )
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_message},
+    ]
+
+    try:
+        raw_completion = await execute_chat_completion(
+            primary_provider_name="groq",
+            messages=messages,
+            temperature=settings.groq_temperature,
+            max_tokens=settings.groq_max_tokens,
+            response_format={"type": "json_object"},
+            fallback_provider_name="deepseek",
+        )
+        result = _parse_llm_json(raw_completion)
+    except Exception as exc:
+        logger.warning("LLM image OCR classification failed, falling back to safe approval", error=str(exc))
+        return TextPipelineResult(
+            decision=ModerationDecision.APPROVED,
+            confidence=0.85,
+            category="clean",
+            flags=["ocr_llm_skipped_on_error"],
+            reason="Image OCR passed local prefilter checks",
+            decided_by="vision_ocr_fallback",
+        )
+
+    # Nếu LLM gặp lỗi parse JSON (ví dụ kết quả không hợp lệ), không chặn ảnh của khách
+    if "llm_parse_error" in result.get("flags", []):
+        logger.warning("Image OCR LLM parse error, falling back to approved", detected_text=detected_text[:100])
+        return TextPipelineResult(
+            decision=ModerationDecision.APPROVED,
+            confidence=0.85,
+            category="clean",
+            flags=["ocr_llm_parse_fallback"],
+            reason="Image OCR text is benign (passed local checks)",
+            decided_by="vision_ocr_fallback",
+        )
+
+    decision_str = result.get("decision", "APPROVED").upper()
+    try:
+        decision = ModerationDecision(decision_str)
+    except ValueError:
+        decision = ModerationDecision.APPROVED
+
+    return TextPipelineResult(
+        decision=decision,
+        confidence=float(result.get("confidence", 0.9)),
+        category=str(result.get("category", "clean")),
+        flags=list(result.get("flags", [])),
+        reason=str(result.get("reason", "Valid image OCR text")),
+        decided_by="vision_ocr_llm",
+        raw_llm_result=result,
+    )
+
 
 
 

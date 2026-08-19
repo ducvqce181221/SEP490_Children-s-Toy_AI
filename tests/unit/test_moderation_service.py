@@ -279,3 +279,76 @@ async def test_moderation_orchestrator_vision_api_failure(mocker):
 
     mock_repo.update_review_status.assert_called_once_with(1, ModerationStatus.MANUAL_REVIEW)
     mock_repo.update_image_status.assert_called_once_with(10, ModerationStatus.MANUAL_REVIEW)
+
+
+@pytest.mark.asyncio
+async def test_moderation_orchestrator_image_with_watermark_ocr_approved(mocker):
+    """Kiểm tra ảnh chứa watermark như 'TAM SHOPPE' được OCR LLM duyệt APPROVED mà không bị chặn."""
+    mocker.patch("app.application.moderation.product_review.get_settings")
+
+    mock_repo = MagicMock()
+    mock_repo.fetch_images_for_review = AsyncMock(return_value=[
+        ReviewImageRecord(
+            review_product_image_id=10,
+            review_product_id=1,
+            image_url="http://example.com/mask.jpg",
+            moderation_status=ModerationStatus.PENDING,
+        ),
+    ])
+    mock_repo.get_recent_rejected_count = AsyncMock(return_value=0)
+    mock_repo.update_review_status = AsyncMock()
+    mock_repo.update_image_status = AsyncMock()
+    mock_repo.insert_moderation_log = AsyncMock()
+    mock_repo.get_reviewer_name_by_review_id = AsyncMock(return_value="Customer")
+    mocker.patch("app.application.moderation.product_review.ModerationRepository", return_value=mock_repo)
+
+    mock_notif = MagicMock()
+    mocker.patch("app.application.moderation.product_review.NotificationService", return_value=mock_notif)
+
+    mock_image = Image.new("RGB", (200, 200), (128, 128, 128))
+    mock_load = mocker.patch("app.application.moderation.product_review.load_image_from_url")
+    mock_load.return_value = ImageLoadResult(image=mock_image, raw_bytes=b"fakebytes", size_bytes=9999, error=None)
+
+    from app.application.moderation.image_pipeline import PrefilterImageResult
+    mock_prefilter = mocker.patch("app.application.moderation.product_review.run_image_prefilter")
+    mock_prefilter.return_value = PrefilterImageResult(decision=ModerationDecision.APPROVED)
+
+    mock_vision_client = MagicMock()
+    mock_vision_client.analyze_images_batch = AsyncMock(return_value=[
+        VisionAnalysisResult(
+            safe_search={"adult": "VERY_UNLIKELY", "violence": "VERY_UNLIKELY", "racy": "VERY_UNLIKELY"},
+            labels=[{"description": "mask", "score": 0.95}],
+            hard_violation=False,
+            violation_reason=None,
+            toy_label_found=True,
+            detected_text="TAM SHOPPE",
+        ),
+    ])
+    mocker.patch("app.application.moderation.product_review.get_vision_client", return_value=mock_vision_client)
+
+    # Mock run_image_ocr_classifier to return APPROVED
+    mock_ocr_llm = mocker.patch("app.application.moderation.product_review.run_image_ocr_classifier")
+    mock_ocr_llm.return_value = TextPipelineResult(
+        decision=ModerationDecision.APPROVED,
+        confidence=1.0,
+        category="clean",
+        reason="Store watermark text on product image",
+    )
+
+    orchestrator = ModerationOrchestrator()
+    review = ReviewRecord(
+        review_id=1,
+        account_id=2,
+        product_id=3,
+        order_id=4,
+        rating=5,
+        comment="",
+        moderation_status=ModerationStatus.PENDING,
+        created_at=datetime.utcnow(),
+    )
+
+    await orchestrator.moderate_review(review)
+
+    mock_repo.update_review_status.assert_called_once_with(1, ModerationStatus.APPROVED)
+    mock_repo.update_image_status.assert_called_once_with(10, ModerationStatus.APPROVED)
+
