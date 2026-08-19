@@ -34,9 +34,6 @@ _FALLBACK_RESULT: dict[str, Any] = {
 def _parse_llm_json(raw: str) -> dict[str, Any]:
     """
     Trích xuất và parse chuỗi phản hồi JSON từ AI LLM:
-    - Loại bỏ thẻ suy luận <think>...</think> (từ các mô hình reasoning).
-    - Tìm kiếm và bóc tách khối Markdown Code Block (```json ... ```) hoặc khối JSON { ... }.
-    - Loại bỏ các lỗi cú pháp phổ biến như dấu phẩy thừa (trailing commas).
     - Chuẩn hóa trường 'decision' (APPROVED, REJECTED, MANUAL_REVIEW).
     - Kiểm tra và ép kiểu điểm tin cậy 'confidence' trong khoảng từ 0.0 đến 1.0.
     - Xử lý danh sách các cờ vi phạm 'flags' và lý do 'reason'.
