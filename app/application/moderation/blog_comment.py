@@ -314,34 +314,55 @@ class BlogCommentModerationService:
         # Cấp độ 4: Kiểm tra Override an toàn sau khi AI phân loại
         return self._force_reject_if_violation(ai_result, comment)
 
-    # Kiểm tra và áp dụng quy tắc ép Từ Chối (Force Reject Safety Policy)
+    # --------------------------------------------------------------------------
+    # Hàm Hậu xử lý (Post-Processor): Ép Từ Chối An Toàn (Force Reject Safety Policy)
+    # Nhiệm vụ: Đóng vai trò là lưới an toàn cuối cùng. Nếu AI chọn Duyệt (APPROVED)
+    # hoặc Duyệt tay (MANUAL_REVIEW) nhưng trong danh mục, cờ (flags) hoặc lý do
+    # lại dính các vi phạm cấm nghiêm trọng -> Ép chuyển thành REJECTED ngay lập tức.
+    # --------------------------------------------------------------------------
     @staticmethod
     def _force_reject_if_violation(ai_result: TextPipelineResult, comment: str) -> TextPipelineResult:
+        # 1. Nếu quyết định từ AI đã là REJECTED rồi -> Giữ nguyên, không cần ép lại
         if ai_result.decision == ModerationDecision.REJECTED:
             return ai_result
 
+        # 2. Chuẩn hóa dữ liệu đầu vào (đưa về chữ thường và xóa khoảng trắng thừa để so sánh chính xác)
         category = ai_result.category.strip().lower()
         flag_set = {flag.strip().lower() for flag in ai_result.flags}
         reason_text = (ai_result.reason or "").strip().lower()
+        
+        # Kiểm tra xem chuỗi lý do của AI có chứa từ khóa vi phạm chính sách nào không
         reason_says_violation = any(token in reason_text for token in _VIOLATION_REASON_TOKENS)
 
-        # Kiểm tra xem có thuộc diện ép Từ chối không
+        # 3. Tổng hợp rà soát 4 điều kiện Ép Từ Chối:
+        # - Điều kiện A: Danh mục (category) nằm trong 17 danh mục vi phạm nghiêm trọng (_FORCE_REJECT_CATEGORIES)
+        # - Điều kiện B: Danh sách cờ (flags) có chứa bất kỳ từ khóa cấm nào trong _FORCE_REJECT_FLAGS (email, phone, bank...)
+        # - Điều kiện C: Văn bản comment quét local bị dính từ chửi thề cực đoan (has_hard_profanity)
+        # - Điều kiện D: Câu lý do do AI viết tự thừa nhận có vi phạm chính sách (reason_says_violation)
         should_force_reject = category in _FORCE_REJECT_CATEGORIES or any(
             any(token in flag for token in _FORCE_REJECT_FLAGS)
             for flag in flag_set
         ) or has_hard_profanity(comment) or reason_says_violation
 
+        # 4. Nếu KHÔNG dính bất kỳ điều kiện nào ở trên -> Giữ nguyên kết quả an toàn ban đầu
         if not should_force_reject:
             return ai_result
 
+        # 5. Nếu DÍNH vi phạm -> Tiến hành ép ghi đè (Override) kết quả thành REJECTED:
         raw = dict(ai_result.raw_llm_result or {})
-        raw["decision"] = "REJECTED"
+        raw["decision"] = "REJECTED" # Đổi decision trong dict AI thành REJECTED
+        
+        # Bổ sung cờ "force_reject_violation" vào danh sách flags để đánh dấu vết
         flags = list(ai_result.flags)
         if "force_reject_violation" not in flags:
             flags.append("force_reject_violation")
         raw["flags"] = flags
+        
+        # Đảm bảo trường reason luôn có mô tả lý do bị ép cấm
         if not raw.get("reason"):
             raw["reason"] = "Detected clear policy violation"
+            
+        # Ghi log nhật ký hệ thống về hành vi ép cấm
         logger.info(
             "Blog comment force rejected by policy",
             original_decision=ai_result.decision.value,
@@ -349,6 +370,8 @@ class BlogCommentModerationService:
             flags=flags,
         )
 
+        # 6. Trả về kết quả mới đã bị ép thành REJECTED với điểm confidence tối thiểu 0.95 (95%)
+        # và đánh dấu đơn vị quyết định là "post_processor"
         return TextPipelineResult(
             decision=ModerationDecision.REJECTED,
             category=ai_result.category,
