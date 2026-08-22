@@ -2,6 +2,7 @@
 app/ai/providers/base.py
 -------------------------
 Base interface and exception definitions for AI inference providers.
+Giao diện cơ sở và định nghĩa ngoại lệ cho các nhà cung cấp dịch vụ AI inference.
 """
 
 from __future__ import annotations
@@ -10,21 +11,27 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
+# Ngoại lệ cơ sở dùng để gom nhóm và báo lỗi khi có sự cố xảy ra từ phía nhà cung cấp AI.
+# Lớp này kế thừa từ RuntimeError.
 class AIProviderError(RuntimeError):
     """Base exception for provider failures."""
     pass
 
 
+# Lớp trừu tượng (Abstract Base Class - ABC) định nghĩa giao diện chung cho mọi nhà cung cấp AI (AI provider).
+# Các nhà cung cấp cụ thể như DeepSeek, Groq sẽ phải kế thừa từ lớp này và hiện thực hóa các phương thức của nó.
 class AIProvider(ABC):
 
+    # Phương thức trừu tượng, bất kỳ lớp con nào kế thừa AIProvider đều bắt buộc phải ghi đè (override)
+    # và hiện thực hóa (implement) phương thức bất đồng bộ (async) chat_completion này.
     @abstractmethod
     async def chat_completion(
         self,
-        messages: list[dict[str, str]],
-        temperature: float,
-        max_tokens: int,
-        response_format: dict[str, Any] | None = None,
-        **kwargs: Any,
+        messages: list[dict[str, str]], # Danh sách các tin nhắn hội thoại dạng dict (ví dụ: [{"role": "user", "content": "..."}])
+        temperature: float,             # Tham số điều chỉnh mức độ sáng tạo/ngẫu nhiên của phản hồi (từ 0.0 đến 2.0)
+        max_tokens: int,                # Số lượng token tối đa mà mô hình được phép sinh ra trong phản hồi
+        response_format: dict[str, Any] | None = None, # Định dạng phản hồi mong muốn (ví dụ định dạng JSON object)
+        **kwargs: Any,                  # Các tham số bổ sung khác tùy theo từng nhà cung cấp cụ thể
     ) -> str:
         """
         Execute chat completion using the model provider.
@@ -42,3 +49,4 @@ class AIProvider(ABC):
             AIProviderError: If the call fails.
         """
         pass
+
