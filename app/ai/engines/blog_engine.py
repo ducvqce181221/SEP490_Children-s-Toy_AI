@@ -582,6 +582,7 @@ async def execute_blog_generation(
             ]
 
         try:
+            # 1. Gọi API sinh bài viết từ mô hình AI (DeepSeek chính, Groq dự phòng) dưới dạng JSON
             raw_completion = await execute_chat_completion(
                 primary_provider_name="deepseek",
                 messages=messages,
@@ -590,24 +591,28 @@ async def execute_blog_generation(
                 response_format={"type": "json_object"},
                 fallback_provider_name="groq",
             )
+            # 2. Parse kết quả JSON thô để lấy tiêu đề và nội dung bài viết
             parsed_title, parsed_content = _try_parse_json_payload(raw_completion)
             generated_title = _ensure_rewritten_english_title(
                 parsed_title, title, description, prompt_structure,
             )
             blog_content = (parsed_content or "").strip()
 
+            # 3. Xử lý trường hợp nội dung bị rỗng (cố gắng làm sạch chuỗi thô để lấy văn bản)
             if not blog_content:
                 fallback_text = _strip_json_prefix_noise(_clean_model_text(raw_completion))
                 if not fallback_text:
                     raise ValueError("empty blogContent")
                 blog_content = fallback_text
 
+            # 4. Chuyển đổi định dạng bài viết sang HTML; tự sinh bài viết dự phòng nếu kết quả trống
             blog_content = _to_html_from_text(blog_content)
             if not blog_content:
                 blog_content = _build_structured_fallback_html(
                     title=generated_title, description=description, prompt_structure=prompt_structure, tone=tone,
                 )
 
+            # 5. Kiểm tra chất lượng bài viết (độ dài, cấu trúc, lặp prompt). Thử lại nếu không đạt.
             if _is_low_quality_or_echo(blog_content):
                 if attempt < (retry_attempts - 1):
                     continue
@@ -615,11 +620,13 @@ async def execute_blog_generation(
                     title=generated_title, description=description, prompt_structure=prompt_structure, tone=tone,
                 )
 
+            # 6. Giới hạn độ dài nội dung, xóa các thẻ/nhãn thừa và xử lý rò rỉ prompt
             if len(blog_content) > MAX_CONTENT_LENGTH:
                 blog_content = blog_content[:MAX_CONTENT_LENGTH]
             blog_content = _remove_forbidden_markers(blog_content, generated_title)
             blog_content = _remove_prompt_leakage(blog_content, prompt_structure)
 
+            # 7. Đảm bảo ngôn ngữ bài viết là tiếng Anh (dùng fallback nếu phát hiện tiếng Việt)
             if _contains_vietnamese_signals(blog_content):
                 blog_content = _build_structured_fallback_html(
                     title=generated_title, description=description, prompt_structure=prompt_structure, tone=tone,
@@ -627,6 +634,7 @@ async def execute_blog_generation(
 
             return generated_title, blog_content
         except Exception as exc:
+            # 8. Ghi nhận lỗi trong lần thử hiện tại và tiếp tục vòng lặp retry
             logger.warning("Generation attempt failed", attempt=attempt + 1, error=str(exc))
             continue
 
